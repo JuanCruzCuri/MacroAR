@@ -1,9 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Publication } from '../types';
 import { fetchPublications, useApi } from '../api';
-import { FALLBACK_PUBLICATIONS } from '../fallbackData';
 import ApiError from './ApiError';
-import OfflineBanner from './OfflineBanner';
 
 type SortOption = 'date_desc' | 'date_asc' | 'source';
 type TypeFilter = 'all' | 'informe' | 'reporte' | 'analisis';
@@ -62,12 +60,12 @@ function getRelativeTime(dateStr: string | null): string {
   return `Hace ${Math.floor(diffDays / 30)} meses`;
 }
 
-export default function Feed({ isOffline }: { isOffline: boolean }) {
+export default function Feed() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('date_desc');
   const [latestOnly, setLatestOnly] = useState(false);
-  const { data: publications, error, loading, reload } = useApi(fetchPublications, FALLBACK_PUBLICATIONS);
+  const { data: publications, error, loading, reload } = useApi(fetchPublications);
   
   const sources = useMemo(
     () => ['all', ...Array.from(new Set((publications ?? []).map(p => p.source))).sort()],
@@ -250,7 +248,6 @@ export default function Feed({ isOffline }: { isOffline: boolean }) {
         )}
       </div>
 
-      {isOffline && <OfflineBanner />}
       {error && <ApiError message={error} onRetry={reload} />}
 
       {loading && !publications && (

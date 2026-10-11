@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { ScrapeStatus } from '../types';
 import { fetchIndicators, formatDateTimeART, useApi } from '../api';
-import { FALLBACK_INDICATORS } from '../fallbackData';
 import IndicatorCard from './IndicatorCard';
 import ApiError from './ApiError';
-import OfflineBanner from './OfflineBanner';
 
 const categories = [
   { key: 'all', label: 'Todos' },
@@ -18,9 +16,9 @@ const categories = [
   { key: 'inmobiliario', label: 'Inmobiliario' },
 ];
 
-export default function Dashboard({ status, isOffline }: { status: ScrapeStatus | null; isOffline: boolean }) {
+export default function Dashboard({ status }: { status: ScrapeStatus | null }) {
   const [filter, setFilter] = useState('all');
-  const { data: indicators, error, loading, reload } = useApi(fetchIndicators, FALLBACK_INDICATORS);
+  const { data: indicators, error, loading, reload } = useApi(fetchIndicators);
   const lastUpdate = formatDateTimeART(status?.last_scrape);
 
   const allIndicators = indicators ?? [];
@@ -56,7 +54,6 @@ export default function Dashboard({ status, isOffline }: { status: ScrapeStatus 
         ))}
       </div>
 
-      {isOffline && <OfflineBanner />}
       {error && <ApiError message={error} onRetry={reload} />}
 
       {loading && !indicators && (
