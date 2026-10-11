@@ -1,0 +1,64 @@
+# ============================================
+# MacroAR - Docker Compose (Desarrollo Local)
+# ============================================
+# Uso: docker-compose up -d
+# Frontend: http://localhost:5173
+# Backend API: http://localhost:8000
+# PostgreSQL: localhost:5432
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: macroar-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: macroar
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  backend:
+    build: ./backend
+    container_name: macroar-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/macroar
+      FRONTEND_URL: http://localhost:5173
+      SCRAPE_DAY_OF_WEEK: fri
+      SCRAPE_HOUR: 18
+      SCRAPE_MINUTE: 0
+      SCRAPE_TIMEZONE: America/Argentina/Buenos_Aires
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # React Frontend (Vite dev server)
+  frontend:
+    image: node:20-alpine
+    container_name: macroar-frontend
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "5173:5173"
+    command: sh -c "cd /app && npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

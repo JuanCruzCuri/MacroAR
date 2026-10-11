@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: macroar-backend
+    runtime: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        value: https://macroar.vercel.app
+      - key: SCRAPE_DAY_OF_WEEK
+        value: fri
+      - key: SCRAPE_HOUR
+        value: 18
+      - key: SCRAPE_MINUTE
+        value: 0
+      - key: SCRAPE_TIMEZONE
+        value: America/Argentina/Buenos_Aires
+    plan: free
+    healthCheckPath: /api/health
