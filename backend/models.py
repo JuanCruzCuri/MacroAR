@@ -20,6 +20,14 @@ class Base(DeclarativeBase):
     pass
 
 
+def format_value(value: float) -> str:
+    """
+    Formatea un valor con hasta 2 decimales, sin ceros sobrantes.
+    1.7 → "1.7", -0.27 → "-0.27", 8883.0 → "8883" (".1f" redondeaba -0.27 a "-0.3").
+    """
+    return f"{value:.2f}".rstrip('0').rstrip('.')
+
+
 class IndicatorSnapshot(Base):
     """
     Snapshot del último valor publicado para cada indicador.
@@ -49,7 +57,7 @@ class IndicatorSnapshot(Base):
             "id": str(self.id),
             "indicator_key": self.indicator_key,
             "name": self.name,
-            "value": f"{self.value:.1f}" if self.value is not None else self.value_raw,
+            "value": format_value(self.value) if self.value is not None else self.value_raw,
             "unit": self.unit or "",
             "period": self.period or "",
             "source": self.source,

@@ -5,22 +5,34 @@ Scraping del reporte de M2 Real de la Universidad del CEMA.
 IMPORTANTE: El "M2 Real" de UCEMA es un índice de precios de metros
 cuadrados de departamentos en CABA (no es el agregado monetario M2).
 URL: https://ucema.edu.ar/indices-y-bases-de-datos
+
+La página tiene varias tarjetas con la misma estructura (.cifras-destacadas),
+p. ej. también la Canasta del Profesional Ejecutivo (CPE). Solo se lee la
+tarjeta cuyo link apunta a un informe M2 (/indices-y-bases-de-datos/m2-MMYYYY).
 """
 import httpx
 import re
 from bs4 import BeautifulSoup
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from utils import clean_numeric_value, safe_text
+from utils import parse_ar_number, normalize_period, safe_text
 
 UCEMA_BASE_URL = "https://ucema.edu.ar"
 UCEMA_INDICES_URL = f"{UCEMA_BASE_URL}/indices-y-bases-de-datos"
+
+M2_LINK = re.compile(r'/indices-y-bases-de-datos/m2-(\d{2})(\d{4})')
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
 }
+
+# (regex sobre el texto de la cifra, key, nombre)
+FIGURE_SPECS = [
+    (r'promedio', "m2_real_indice", "M2 Real — Índice M² CABA"),
+    (r'acumulada', "m2_real_acumulado", "M2 Real — Variación Acumulada CABA"),
+]
 
 
 async def fetch_page(url: str) -> Optional[str]:
@@ -35,143 +47,90 @@ async def fetch_page(url: str) -> Optional[str]:
         return None
 
 
+def full_url(href: str) -> str:
+    return href if href.startswith('http') else f"{UCEMA_BASE_URL}{href}"
+
+
+def find_m2_card(soup: BeautifulSoup):
+    """Devuelve el contenedor de la tarjeta "Último informe" del M2 Real."""
+    for figures in soup.select('.cifras-destacadas'):
+        node = figures
+        for _ in range(8):
+            node = node.parent
+            if node is None:
+                break
+            if node.find('a', href=M2_LINK):
+                return node
+    return None
+
+
 def parse_real_m2(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae el indicador de M2 Real (metro cuadrado real) de UCEMA.
-    La página tiene una estructura con:
-    - "Cifra destacada": valor del índice promedio
-    - "Cifra destacada 2": variación acumulada
-    - "Mes/Año": período
-    """
+    """Extrae las cifras destacadas del último informe M2 Real."""
     indicators = []
     soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar la sección de M2 Real
-    # Estructura: "Cifra destacada" seguido del valor
-    cifra_destacada = soup.find_all(string=re.compile(r'Cifra destacada', re.I))
-    
-    if cifra_destacada:
-        for elem in cifra_destacada:
-            parent = elem.find_parent()
-            if parent:
-                # Buscar el siguiente elemento con un valor numérico
-                next_elem = parent.find_next_sibling()
-                if next_elem:
-                    text = safe_text(next_elem)
-                    value = clean_numeric_value(text)
-                    if value is not None:
-                        # Determinar si es índice promedio o variación
-                        label = safe_text(parent)
-                        if 'promedio' in label.lower() or 'indice' in label.lower():
-                            indicators.append({
-                                "indicator_key": "m2_real_indice",
-                                "name": "M2 Real — Índice M² CABA",
-                                "value": value,
-                                "value_raw": text,
-                                "unit": "%",
-                                "period": "",  # Se completa abajo
-                                "source": "UCEMA",
-                                "source_url": UCEMA_INDICES_URL,
-                                "category": "inmobiliario"
-                            })
-                        elif 'variación' in label.lower() or 'acumulada' in label.lower():
-                            indicators.append({
-                                "indicator_key": "m2_real_acumulado",
-                                "name": "M2 Real — Variación Acumulada CABA",
-                                "value": value,
-                                "value_raw": text,
-                                "unit": "%",
-                                "period": "",
-                                "source": "UCEMA",
-                                "source_url": UCEMA_INDICES_URL,
-                                "category": "inmobiliario"
-                            })
-    
-    # Buscar período (Mes/Año)
-    mes_anio = re.search(r'(Mes/Año|Período).*?(\w+\s+\d{4})', all_text, re.DOTALL | re.IGNORECASE)
-    if mes_anio and indicators:
-        period = mes_anio.group(2).strip()
-        for ind in indicators:
-            ind["period"] = period
-    
-    # Fallback: buscar valores en texto general
-    if not indicators:
-        # Buscar patrón "0,XX%" que es el índice promedio
-        match = re.search(r'(\d+[.,]\d+)\s*%', all_text)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and value < 5:
+    card = find_m2_card(soup)
+    if card is None:
+        print("⚠️ UCEMA: no se encontró la tarjeta del M2 Real")
+        return indicators
+
+    period = normalize_period(safe_text(card.select_one('.views-field-field-mes-ano')))
+    source_url = full_url(card.find('a', href=M2_LINK)['href'])
+
+    for wrapper in card.select('.cifra-destacada-wrapper'):
+        label = safe_text(wrapper.select_one('.cifra-destacada-texto'))
+        raw_value = safe_text(wrapper.select_one('.cifra-destacada'))
+        value = parse_ar_number(raw_value)
+        if value is None:
+            continue
+        for pattern, key, name in FIGURE_SPECS:
+            if re.search(pattern, label, re.IGNORECASE):
                 indicators.append({
-                    "indicator_key": "m2_real_indice",
-                    "name": "M2 Real — Índice M² CABA",
+                    "indicator_key": key,
+                    "name": name,
                     "value": value,
-                    "value_raw": match.group(1),
+                    "value_raw": raw_value,
                     "unit": "%",
-                    "period": datetime.now().strftime("%B %Y"),
+                    "period": period,
                     "source": "UCEMA",
-                    "source_url": UCEMA_INDICES_URL,
-                    "category": "inmobiliario"
+                    "source_url": source_url,
+                    "category": "inmobiliario",
                 })
-    
+                break
+
     return indicators
 
 
 def parse_publications(html: str) -> List[Dict[str, Any]]:
-    """Extrae publicaciones del M2 Real de UCEMA."""
-    publications = []
+    """Extrae los informes M2 Real (último + anteriores). Fecha = mes del informe."""
+    publications = {}
     soup = BeautifulSoup(html, 'lxml')
-    
-    # Buscar links a PDFs de M2 Real
-    links = soup.find_all('a', href=True)
-    seen_urls = set()
-    
-    for link in links:
-        href = link.get('href', '')
+
+    for link in soup.find_all('a', href=M2_LINK):
         title = safe_text(link)
-        
-        if ('m2' in href.lower() or 'm2' in title.lower() or 
-            'metro' in title.lower() or 'real' in title.lower()):
-            if href not in seen_urls and ('pdf' in href.lower() or 'm2-' in href.lower()):
-                seen_urls.add(href)
-                full_url = href if href.startswith('http') else f"{UCEMA_BASE_URL}{href}"
-                
-                pub_title = title if len(title) > 5 else "Informe M2 Real - UCEMA"
-                
-                publications.append({
-                    "title": pub_title[:500],
-                    "date": datetime.now(),
-                    "source": "UCEMA",
-                    "url": full_url,
-                    "type": "reporte",
-                    "description": "Informe M2 Real de la Universidad del CEMA. Índice de precios reales de metros cuadrados de departamentos en CABA."
-                })
-    
-    return publications[:5]
+        url = full_url(link['href'])
+        if url in publications or len(title) < 10:  # descarta "Ver informe"
+            continue
+        match = M2_LINK.search(link['href'])
+        publications[url] = {
+            "title": title[:500],
+            "date": datetime(int(match.group(2)), int(match.group(1)), 1),
+            "source": "UCEMA",
+            "url": url,
+            "type": "reporte",
+            "description": "Informe M2 Real de la Universidad del CEMA. Índice de precios reales de metros cuadrados de departamentos en CABA.",
+        }
+
+    return list(publications.values())[:5]
 
 
 async def scrape_real_m2() -> Dict[str, List[Dict[str, Any]]]:
     """Función principal de scraping para Real M2 Report (UCEMA)."""
     result = {"indicators": [], "publications": []}
-    
+
     html = await fetch_page(UCEMA_INDICES_URL)
     if html:
         result["indicators"] = parse_real_m2(html)
         result["publications"] = parse_publications(html)
-    
-    # Si no encontramos datos en la página de índices, intentar la página específica del último informe
-    if not result["indicators"]:
-        # Buscar el link al último informe M2
-        if html:
-            soup = BeautifulSoup(html, 'lxml')
-            m2_links = soup.find_all('a', href=re.compile(r'm2-\d+'))
-            if m2_links:
-                last_m2_url = m2_links[0].get('href', '')
-                if last_m2_url:
-                    full_url = last_m2_url if last_m2_url.startswith('http') else f"{UCEMA_BASE_URL}{last_m2_url}"
-                    m2_html = await fetch_page(full_url)
-                    if m2_html:
-                        result["indicators"] = parse_real_m2(m2_html)
-    
+
     print(f"✅ UCEMA Real M2: {len(result['indicators'])} indicadores, {len(result['publications'])} publicaciones")
     return result

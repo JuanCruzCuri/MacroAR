@@ -10,12 +10,15 @@ services:
       - key: FRONTEND_URL
         value: https://macroar.vercel.app
       - key: SCRAPE_DAY_OF_WEEK
-        value: fri
+        value: "*"
       - key: SCRAPE_HOUR
         value: 18
       - key: SCRAPE_MINUTE
         value: 0
       - key: SCRAPE_TIMEZONE
         value: America/Argentina/Buenos_Aires
+      # Token para POST /api/scrape (usado por .github/workflows/scrape.yml)
+      - key: SCRAPE_TOKEN
+        sync: false
     plan: free
     healthCheckPath: /api/health

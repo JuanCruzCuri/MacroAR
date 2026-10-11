@@ -1,4 +1,9 @@
-export default function Header() {
+import { ScrapeStatus } from '../types';
+import { formatDateTimeART } from '../api';
+
+export default function Header({ status }: { status: ScrapeStatus | null }) {
+  const lastUpdate = formatDateTimeART(status?.last_scrape);
+
   return (
     <header className="border-b border-gray-800 bg-gray-950/90 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -14,12 +19,14 @@ export default function Header() {
           </div>
           
           <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-              <span>Última actualización: 18 de Octubre 2026, 18:00 ART</span>
-            </div>
+            {lastUpdate && (
+              <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                <span>Última actualización: {lastUpdate}</span>
+              </div>
+            )}
             <a
-              href="https://github.com"
+              href="https://github.com/JuanCruzCuri/MacroAR"
               target="_blank"
               rel="noopener noreferrer"
               className="text-gray-400 hover:text-white transition-colors"

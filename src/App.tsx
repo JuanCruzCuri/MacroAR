@@ -3,13 +3,15 @@ import Dashboard from './components/Dashboard';
 import Feed from './components/Feed';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import { fetchStatus, useApi } from './api';
 
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'feed'>('dashboard');
+  const { data: status } = useApi(fetchStatus);
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
-      <Header />
+      <Header status={status} />
       
       {/* Tab Navigation */}
       <nav className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-16 z-40">
@@ -47,10 +49,10 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        {activeTab === 'dashboard' ? <Dashboard /> : <Feed />}
+        {activeTab === 'dashboard' ? <Dashboard status={status} /> : <Feed />}
       </main>
 
-      <Footer />
+      <Footer status={status} />
     </div>
   );
 }

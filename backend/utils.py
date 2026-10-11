@@ -208,11 +208,86 @@ def extract_text_between(html_text: str, start_marker: str, end_marker: str) -> 
         return None
 
 
-def safe_text(element) -> str:
-    """Extrae texto de un elemento BeautifulSoup de forma segura."""
+def safe_text(element, separator: str = ' ') -> str:
+    """
+    Extrae texto de un elemento BeautifulSoup de forma segura.
+    Usar separator='\n' cuando se necesite separar el texto en líneas
+    (get_text(strip=True) sin separador pega los bloques entre sí).
+    """
     if element is None:
         return ''
     try:
-        return element.get_text(strip=True)
+        return element.get_text(separator, strip=True)
     except Exception:
         return str(element).strip()
+
+
+MONTHS_ES = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
+    'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+]
+
+ORDINALS_ES = {
+    'primer': 1, 'primero': 1, '1er': 1, '1ro': 1, '1': 1,
+    'segundo': 2, '2do': 2, '2': 2,
+    'tercer': 3, 'tercero': 3, '3er': 3, '3ro': 3, '3': 3,
+    'cuarto': 4, '4to': 4, '4': 4,
+}
+
+
+def parse_ar_number(raw_value: str) -> Optional[float]:
+    """
+    Parsea un número en formato argentino estricto (punto = miles, coma = decimal).
+    A diferencia de clean_numeric_value, "8.883" se interpreta como 8883.
+
+    - "8.883" → 8883.0
+    - "-2,9%" → -2.9
+    - "+2,4%" → 2.4
+    - "46.466.688" → 46466688.0
+    """
+    if raw_value is None:
+        return None
+    cleaned = str(raw_value).strip().replace('−', '-')  # signo menos unicode
+    cleaned = re.sub(r'[^\d,.\-+]', '', cleaned)
+    if not re.search(r'\d', cleaned):
+        return None
+    cleaned = cleaned.replace('.', '').replace(',', '.')
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def format_period(dt: datetime) -> str:
+    """datetime → 'Agosto 2026' (en español, sin depender del locale)."""
+    return f"{MONTHS_ES[dt.month - 1]} {dt.year}"
+
+
+def normalize_period(text: str) -> str:
+    """
+    Normaliza períodos a un formato uniforme en español.
+
+    - "Agosto 2026" / "agosto de 2026" → "Agosto 2026"
+    - "Segundo trimestre 2026" / "2do. trimestre de 2026" → "Q2 2026"
+    - "Primer semestre de 2026" → "S1 2026"
+
+    En textos largos devuelve el primer período que aparece
+    ("En julio de 2026 ... respecto a diciembre de 2025" → "Julio 2026").
+    """
+    if not text:
+        return ''
+    lower = text.lower()
+    months = '|'.join(m.lower() for m in MONTHS_ES)
+    pattern = re.compile(
+        rf'(?P<ord>\w+)\.?\s*(?P<kind>trimestre|semestre)\s+(?:de\s+)?(?P<qyear>\d{{4}})'
+        rf'|(?P<month>{months})\s+(?:de\s+|del\s+)?(?P<myear>\d{{4}})'
+    )
+    for match in pattern.finditer(lower):
+        if match.group('month'):
+            month = MONTHS_ES[[m.lower() for m in MONTHS_ES].index(match.group('month'))]
+            return f"{month} {match.group('myear')}"
+        if match.group('ord') in ORDINALS_ES:
+            prefix = 'Q' if match.group('kind') == 'trimestre' else 'S'
+            return f"{prefix}{ORDINALS_ES[match.group('ord')]} {match.group('qyear')}"
+
+    return text.strip() if len(text) <= 40 else ''

@@ -1,4 +1,9 @@
-export default function Footer() {
+import { ScrapeStatus } from '../types';
+import { formatDateTimeART } from '../api';
+
+export default function Footer({ status }: { status: ScrapeStatus | null }) {
+  const nextUpdate = formatDateTimeART(status?.next_scrape);
+
   return (
     <footer className="border-t border-gray-800 bg-gray-950 py-6">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -6,9 +11,11 @@ export default function Footer() {
           <p className="text-xs text-gray-500">
             Datos obtenidos de fuentes públicas: INDEC, CIF-UTDT, GCBA, UCEMA
           </p>
-          <p className="text-xs text-gray-600">
-            Próxima actualización: 19 de Octubre 2026, 18:00 ART
-          </p>
+          {nextUpdate && (
+            <p className="text-xs text-gray-600">
+              Próxima actualización: {nextUpdate}
+            </p>
+          )}
         </div>
       </div>
     </footer>

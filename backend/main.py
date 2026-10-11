@@ -7,19 +7,21 @@ Endpoints:
 - GET /api/indicators → Snapshot actual de indicadores
 - GET /api/publications → Feed de publicaciones
 - GET /api/health → Health check
-- POST /api/scrape → Trigger manual de scraping (solo dev)
+- GET /api/meta/status → Último scraping y próxima ejecución programada
+- POST /api/scrape → Trigger manual de scraping (requiere header X-Scrape-Token)
 """
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List
+from typing import List, Optional
+import secrets
 
 from config import settings
 from database import get_db, init_db
 from models import IndicatorSnapshot, PublicationFeed
-from scheduler import start_scheduler, run_scraping_job
+from scheduler import start_scheduler, run_scraping_job, run_if_stale, get_last_scrape
 
 # Variable global para el scheduler
 scheduler = None
@@ -34,6 +36,7 @@ async def lifespan(app: FastAPI):
     
     global scheduler
     scheduler = start_scheduler()
+    run_if_stale()
     
     print(f"✅ API lista en http://0.0.0.0:8000")
     print(f"🌐 Frontend permitido: {settings.FRONTEND_URL}")
@@ -202,17 +205,44 @@ async def get_sources(db: Session = Depends(get_db)):
     return {"sources": sorted(list(all_sources))}
 
 
+@app.get("/api/meta/status")
+async def get_status():
+    """Último scraping y próxima ejecución programada (para mostrar en el frontend)."""
+    last = get_last_scrape()
+    job = scheduler.get_job("scraping_job") if scheduler else None
+    next_run = job.next_run_time if job else None
+    return {
+        "last_scrape": last.isoformat() if last else None,
+        "next_scrape": next_run.isoformat() if next_run else None,
+        "timezone": settings.SCRAPE_TIMEZONE,
+    }
+
+
 @app.post("/api/scrape")
-async def trigger_scrape():
+async def trigger_scrape(x_scrape_token: Optional[str] = Header(default=None)):
     """
     Trigger manual del proceso de scraping.
-    Útil para testing o actualización inmediata.
-    Nota: En producción, considerar agregar autenticación.
+    Útil para testing, actualización inmediata o para un cron externo
+    (ver .github/workflows/scrape.yml).
+    Requiere el header X-Scrape-Token == SCRAPE_TOKEN. Si SCRAPE_TOKEN no está
+    configurado, el endpoint queda deshabilitado.
     """
+    if not settings.SCRAPE_TOKEN:
+        raise HTTPException(status_code=403, detail="Trigger manual deshabilitado (SCRAPE_TOKEN no configurado)")
+    if not x_scrape_token or not secrets.compare_digest(x_scrape_token, settings.SCRAPE_TOKEN):
+        raise HTTPException(status_code=401, detail="Token inválido")
+
     try:
         # Ejecutar en un thread para no bloquear
         import threading
-        thread = threading.Thread(target=run_scraping_job)
+        from scheduler import _job_lock
+        if _job_lock.locked():
+            return {
+                "status": "already_running",
+                "message": "Ya hay un scraping en curso",
+                "timestamp": datetime.now().isoformat()
+            }
+        thread = threading.Thread(target=run_scraping_job, daemon=True)
         thread.start()
         
         return {
