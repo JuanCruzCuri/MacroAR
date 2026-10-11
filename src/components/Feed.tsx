@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Publication } from '../types';
-import { mockPublications } from '../data/mockData';
+import { fetchPublications, useApi } from '../api';
+import ApiError from './ApiError';
 
 type SortOption = 'date_desc' | 'date_asc' | 'source';
 type TypeFilter = 'all' | 'informe' | 'reporte' | 'analisis';
@@ -31,7 +32,12 @@ function getTypeLabel(type: string): string {
   }
 }
 
-function formatDate(dateStr: string): string {
+function toTime(dateStr: string | null): number {
+  return dateStr ? new Date(dateStr + 'T00:00:00').getTime() : 0;
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '';
   const date = new Date(dateStr + 'T00:00:00');
   return date.toLocaleDateString('es-AR', {
     day: 'numeric',
@@ -40,13 +46,14 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function getRelativeTime(dateStr: string): string {
+function getRelativeTime(dateStr: string | null): string {
+  if (!dateStr) return '';
   const date = new Date(dateStr + 'T00:00:00');
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   
-  if (diffDays === 0) return 'Hoy';
+  if (diffDays <= 0) return 'Hoy';
   if (diffDays === 1) return 'Ayer';
   if (diffDays < 7) return `Hace ${diffDays} días`;
   if (diffDays < 30) return `Hace ${Math.floor(diffDays / 7)} semanas`;
@@ -58,8 +65,12 @@ export default function Feed() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('date_desc');
   const [latestOnly, setLatestOnly] = useState(false);
+  const { data: publications, error, loading, reload } = useApi(fetchPublications);
   
-  const sources = ['all', 'INDEC', 'CIF-UTDT', 'DGEC - GCBA', 'UCEMA'];
+  const sources = useMemo(
+    () => ['all', ...Array.from(new Set((publications ?? []).map(p => p.source))).sort()],
+    [publications]
+  );
   const types: { key: TypeFilter; label: string }[] = [
     { key: 'all', label: 'Todos los tipos' },
     { key: 'informe', label: '📄 Informes' },
@@ -69,7 +80,7 @@ export default function Feed() {
 
   // Apply filters and sorting
   const filteredPublications = useMemo(() => {
-    let result = [...mockPublications];
+    let result = [...(publications ?? [])];
     
     // Filter by source
     if (sourceFilter !== 'all') {
@@ -85,7 +96,7 @@ export default function Feed() {
     if (latestOnly) {
       const latestBySource: Record<string, Publication> = {};
       // Sort by date first to get the latest
-      result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      result.sort((a, b) => toTime(b.date) - toTime(a.date));
       for (const pub of result) {
         if (!latestBySource[pub.source]) {
           latestBySource[pub.source] = pub;
@@ -97,10 +108,10 @@ export default function Feed() {
     // Sort
     switch (sortBy) {
       case 'date_desc':
-        result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        result.sort((a, b) => toTime(b.date) - toTime(a.date));
         break;
       case 'date_asc':
-        result.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        result.sort((a, b) => toTime(a.date) - toTime(b.date));
         break;
       case 'source':
         result.sort((a, b) => a.source.localeCompare(b.source));
@@ -108,7 +119,7 @@ export default function Feed() {
     }
     
     return result;
-  }, [sourceFilter, typeFilter, sortBy, latestOnly]);
+  }, [publications, sourceFilter, typeFilter, sortBy, latestOnly]);
 
   return (
     <div>
@@ -237,6 +248,16 @@ export default function Feed() {
         )}
       </div>
 
+      {error && <ApiError message={error} onRetry={reload} />}
+
+      {loading && !publications && (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="card h-28 animate-pulse bg-gray-900/50" />
+          ))}
+        </div>
+      )}
+
       {/* Publications List */}
       <div className="space-y-3">
         {filteredPublications.map((pub: Publication) => (
@@ -244,7 +265,7 @@ export default function Feed() {
         ))}
       </div>
 
-      {filteredPublications.length === 0 && (
+      {publications && filteredPublications.length === 0 && (
         <div className="text-center py-12 bg-gray-900/30 rounded-xl border border-gray-800">
           <svg className="w-12 h-12 text-gray-700 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

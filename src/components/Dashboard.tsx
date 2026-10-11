@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Indicator } from '../types';
-import { mockIndicators } from '../data/mockData';
+import { ScrapeStatus } from '../types';
+import { fetchIndicators, formatDateTimeART, useApi } from '../api';
 import IndicatorCard from './IndicatorCard';
+import ApiError from './ApiError';
 
 const categories = [
   { key: 'all', label: 'Todos' },
@@ -15,12 +16,15 @@ const categories = [
   { key: 'inmobiliario', label: 'Inmobiliario' },
 ];
 
-export default function Dashboard() {
+export default function Dashboard({ status }: { status: ScrapeStatus | null }) {
   const [filter, setFilter] = useState('all');
+  const { data: indicators, error, loading, reload } = useApi(fetchIndicators);
+  const lastUpdate = formatDateTimeART(status?.last_scrape);
 
+  const allIndicators = indicators ?? [];
   const filteredIndicators = filter === 'all'
-    ? mockIndicators
-    : mockIndicators.filter(i => i.category === filter);
+    ? allIndicators
+    : allIndicators.filter(i => i.category === filter);
 
   return (
     <div>
@@ -50,12 +54,30 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {error && <ApiError message={error} onRetry={reload} />}
+
+      {loading && !indicators && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="card h-40 animate-pulse bg-gray-900/50" />
+          ))}
+        </div>
+      )}
+
       {/* Indicators Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredIndicators.map(indicator => (
           <IndicatorCard key={indicator.id} indicator={indicator} />
         ))}
       </div>
+
+      {indicators && filteredIndicators.length === 0 && (
+        <p className="text-center text-gray-500 py-12">
+          {allIndicators.length === 0
+            ? 'Todavía no hay datos: el primer scraping puede tardar unos segundos.'
+            : 'No hay indicadores en esta categoría.'}
+        </p>
+      )}
 
       {/* Info Banner */}
       <div className="mt-8 p-4 bg-gray-900/50 border border-gray-800 rounded-xl">
@@ -65,11 +87,11 @@ export default function Dashboard() {
           </svg>
           <div>
             <p className="text-sm text-gray-300">
-              <span className="font-medium text-emerald-400">Datos verificados:</span> Los valores mostrados fueron obtenidos por scraping directo de las fuentes oficiales (INDEC, CIF-UTDT, DGEC-CABA, UCEMA).
+              <span className="font-medium text-emerald-400">Fuentes oficiales:</span> Los valores mostrados se obtienen por scraping directo de las fuentes (INDEC, CIF-UTDT, DGEC-CABA, UCEMA).
               Se actualizan automáticamente todos los días a las 18:00 ART.
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Último scraping: 18 de Octubre 2026 · Los enlaces apuntan a los documentos PDF originales de cada fuente.
+              {lastUpdate ? `Último scraping: ${lastUpdate} · ` : ''}Los enlaces apuntan a los informes originales de cada fuente.
             </p>
           </div>
         </div>

@@ -6,13 +6,15 @@ La página principal (utdt.edu/cif) muestra los 3 indicadores principales:
 - Encuesta de Expectativas de Inflación (EI)
 - Índice de Confianza del Consumidor (ICC)
 - Índice Líder (IL)
+
+Estructura de cada tarjeta:
+  .indicesCuadros > a > h4 (nombre) + p.indicesFechas (período) + p.cif-stat-num (valor)
 """
 import httpx
 import re
 from bs4 import BeautifulSoup
-from datetime import datetime
 from typing import List, Dict, Any, Optional
-from utils import clean_numeric_value, safe_text
+from utils import parse_ar_number, normalize_period, parse_argentine_date, safe_text
 
 CIF_BASE_URL = "https://www.utdt.edu"
 CIF_HOME_URL = f"{CIF_BASE_URL}/cif"
@@ -22,6 +24,13 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
 }
+
+# (regex sobre el título de la tarjeta, key, nombre, categoría)
+INDICATOR_SPECS = [
+    (r'expectativas de inflaci', "expectativas_inflacion", "Expectativas de Inflación", "expectativas"),
+    (r'confianza del consumidor', "confianza_consumidor", "Índice Confianza del Consumidor", "expectativas"),
+    (r'[íi]ndice\s+l[íi]der', "indice_lider", "Índice Líder (CIF)", "actividad"),
+]
 
 
 async def fetch_page(url: str) -> Optional[str]:
@@ -36,142 +45,97 @@ async def fetch_page(url: str) -> Optional[str]:
         return None
 
 
+def full_url(href: str) -> str:
+    return href if href.startswith('http') else f"{CIF_BASE_URL}/{href.lstrip('/')}"
+
+
+def parse_report_links(soup: BeautifulSoup) -> Dict[str, str]:
+    """
+    Mapea título de sección → URL del PDF ("Descargar informe").
+    El título es el primer encabezado que se encuentra subiendo desde el link.
+    """
+    links = {}
+    for link in soup.find_all('a', href=re.compile(r'download\.php|\.pdf$', re.I)):
+        node = link
+        for _ in range(6):
+            node = node.parent
+            if node is None:
+                break
+            heading = node.find(['h2', 'h3', 'h4', 'h5', 'strong'])
+            if heading:
+                links.setdefault(safe_text(heading), full_url(link['href']))
+                break
+    return links
+
+
 def parse_indicators(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae los 3 indicadores principales del CIF.
-    La estructura en la página es:
-    - Links con nombre del indicador, período y valor
-    Ejemplo: "Encuesta de Expectativas de Inflación (EI) / Septiembre 2026 / 29,8%"
-    """
+    """Extrae los 3 indicadores principales del CIF desde las tarjetas .indicesCuadros."""
     indicators = []
     soup = BeautifulSoup(html, 'lxml')
-    
-    # Buscar todos los links que contienen información de indicadores
-    all_links = soup.find_all('a', href=True)
-    
-    for link in all_links:
-        href = link.get('href', '')
-        text = safe_text(link)
-        
-        if not text or len(text) < 10:
-            continue
-        
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        
-        # Buscar Encuesta de Expectativas de Inflación
-        if 'expectativas' in text.lower() and 'inflación' in text.lower() or 'inflacion' in text.lower():
-            for line in lines:
-                value = clean_numeric_value(line)
-                if value is not None and value > 5:  # Expectativas de inflación > 5%
-                    # Buscar período
-                    period = ''
-                    for l in lines:
-                        if re.search(r'(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+\d{4}', l.lower()):
-                            period = l
-                            break
-                    
-                    indicators.append({
-                        "indicator_key": "expectativas_inflacion",
-                        "name": "Expectativas de Inflación",
-                        "value": value,
-                        "value_raw": str(value),
-                        "unit": "%",
-                        "period": period,
-                        "source": "CIF-UTDT",
-                        "source_url": f"{CIF_BASE_URL}{href}" if not href.startswith('http') else href,
-                        "category": "inflacion"
-                    })
-                    break
-        
-        # Buscar Índice de Confianza del Consumidor
-        elif 'confianza' in text.lower() and 'consumidor' in text.lower():
-            for line in lines:
-                value = clean_numeric_value(line)
-                if value is not None and abs(value) < 50:  # Rango razonable
-                    period = ''
-                    for l in lines:
-                        if re.search(r'(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+\d{4}', l.lower()):
-                            period = l
-                            break
-                    
-                    indicators.append({
-                        "indicator_key": "icc",
-                        "name": "Índice Confianza del Consumidor",
-                        "value": value,
-                        "value_raw": str(value),
-                        "unit": "%",
-                        "period": period,
-                        "source": "CIF-UTDT",
-                        "source_url": f"{CIF_BASE_URL}{href}" if not href.startswith('http') else href,
-                        "category": "financiero"
-                    })
-                    break
-        
-        # Buscar Índice Líder
-        elif 'índice líder' in text.lower() or 'indice lider' in text.lower():
-            for line in lines:
-                value = clean_numeric_value(line)
-                if value is not None and abs(value) < 10:  # Variación mensual pequeña
-                    period = ''
-                    for l in lines:
-                        if re.search(r'(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+\d{4}', l.lower()):
-                            period = l
-                            break
-                    
-                    indicators.append({
-                        "indicator_key": "indice_lider",
-                        "name": "Índice Líder (CIF)",
-                        "value": value,
-                        "value_raw": str(value),
-                        "unit": "%",
-                        "period": period,
-                        "source": "CIF-UTDT",
-                        "source_url": f"{CIF_BASE_URL}{href}" if not href.startswith('http') else href,
-                        "category": "actividad"
-                    })
-                    break
-    
+    report_links = parse_report_links(soup)
+
+    for card in soup.select('.indicesCuadros'):
+        title = safe_text(card.find('h4'))
+        raw_value = safe_text(card.select_one('.cif-stat-num'))
+        period = normalize_period(safe_text(card.select_one('.indicesFechas')))
+
+        for pattern, key, name, category in INDICATOR_SPECS:
+            if not re.search(pattern, title, re.IGNORECASE):
+                continue
+            value = parse_ar_number(raw_value)
+            if value is None:
+                break
+            source_url = next(
+                (url for heading, url in report_links.items() if re.search(pattern, heading, re.IGNORECASE)),
+                CIF_HOME_URL,
+            )
+            indicators.append({
+                "indicator_key": key,
+                "name": name,
+                "value": value,
+                "value_raw": raw_value,
+                "unit": "%",
+                "period": period,
+                "source": "CIF-UTDT",
+                "source_url": source_url,
+                "category": category,
+            })
+            break
+
     return indicators
 
 
-def parse_publications(html: str) -> List[Dict[str, Any]]:
-    """Extrae publicaciones (PDFs) del CIF."""
+def parse_publications(html: str, indicators: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Extrae los informes (PDFs) del CIF. El título se toma del encabezado de la sección,
+    y la fecha del período del indicador correspondiente (si existe).
+    """
     publications = []
     soup = BeautifulSoup(html, 'lxml')
-    
-    # Buscar links a PDFs
-    links = soup.find_all('a', href=True)
-    seen_urls = set()
-    
-    for link in links:
-        href = link.get('href', '')
-        text = safe_text(link)
-        
-        if 'download.php' in href or href.endswith('.pdf'):
-            if href not in seen_urls and len(text) > 5:
-                seen_urls.add(href)
-                full_url = href if href.startswith('http') else f"{CIF_BASE_URL}{href}"
-                
-                publications.append({
-                    "title": text[:500] if len(text) > 5 else "Informe CIF-UTDT",
-                    "date": datetime.now(),
-                    "source": "CIF-UTDT",
-                    "url": full_url,
-                    "type": "reporte",
-                    "description": f"Publicación del Centro de Investigación en Finanzas - UTDT"
-                })
-    
+    periods_by_url = {ind["source_url"]: ind["period"] for ind in indicators}
+
+    for heading, url in parse_report_links(soup).items():
+        period = periods_by_url.get(url, '')
+        publications.append({
+            "title": f"{heading} — {period}" if period else heading,
+            "date": parse_argentine_date(period) if period else None,
+            "source": "CIF-UTDT",
+            "url": url,
+            "type": "reporte",
+            "description": "Publicación del Centro de Investigación en Finanzas - UTDT",
+        })
+
     return publications[:10]
 
 
 async def scrape_cif() -> Dict[str, List[Dict[str, Any]]]:
     """Función principal de scraping para CIF-UTDT."""
     result = {"indicators": [], "publications": []}
-    
+
     html = await fetch_page(CIF_HOME_URL)
     if html:
         result["indicators"] = parse_indicators(html)
-        result["publications"] = parse_publications(html)
-    
+        result["publications"] = parse_publications(html, result["indicators"])
+
     print(f"✅ CIF-UTDT: {len(result['indicators'])} indicadores, {len(result['publications'])} publicaciones")
     return result

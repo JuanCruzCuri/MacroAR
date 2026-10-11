@@ -1,0 +1,36 @@
+# ============================================
+# MacroAR - Scraping diario (cron externo)
+# ============================================
+# En Render free el servidor se duerme tras 15 min sin tráfico y el
+# APScheduler interno no corre mientras duerme. Este workflow despierta
+# el backend y dispara el scraping todos los días a las 18:05 ART.
+#
+# Configurar en GitHub → Settings → Secrets and variables → Actions:
+#   MACROAR_API_URL  → p. ej. https://macroar-backend.onrender.com
+#   SCRAPE_TOKEN     → el mismo valor que la variable SCRAPE_TOKEN del backend
+name: Scraping diario
+
+on:
+  schedule:
+    - cron: "5 21 * * *"  # 21:05 UTC = 18:05 ART
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar scraping
+        env:
+          API_URL: ${{ secrets.MACROAR_API_URL }}
+          SCRAPE_TOKEN: ${{ secrets.SCRAPE_TOKEN }}
+        run: |
+          if [ -z "$API_URL" ] || [ -z "$SCRAPE_TOKEN" ]; then
+            echo "Secrets MACROAR_API_URL / SCRAPE_TOKEN no configurados; se omite."
+            exit 0
+          fi
+          # Despertar el servidor (el primer request puede tardar ~1 min en Render free)
+          curl --silent --show-error --retry 5 --retry-delay 15 --retry-all-errors --max-time 120 \
+            "$API_URL/api/health"
+          echo
+          curl --silent --show-error --fail-with-body --max-time 60 \
+            -X POST -H "X-Scrape-Token: $SCRAPE_TOKEN" "$API_URL/api/scrape"

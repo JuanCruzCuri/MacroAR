@@ -2,42 +2,93 @@
 MacroAR - Scraper INDEC
 ========================
 Scraping de indicadores del INDEC.
-Scrapea el homepage (que tiene los indicadores principales) y páginas
-específicas para indicadores adicionales.
+
+IMPORTANTE: las URLs públicas del INDEC (indec.gob.ar/indec/web/Nivel3-Tema-3-5)
+devuelven solo el "shell" de la página; el contenido se carga por AJAX desde
+fragmentos HTML (indec.gob.ar/Nivel3/Tema/3/5). Este scraper consulta
+directamente esos fragmentos.
+
+Dos tipos de bloques se extraen de los fragmentos:
+- Tarjetas destacadas (.indicadores-inicio): nombre, valor, medida, período y serie.
+  Es la fuente principal y la más estable.
+- Informes técnicos (.item-n3): fecha, título, resumen y PDF. Se usan para el
+  feed de publicaciones y para indicadores que solo aparecen en el resumen.
 
 Indicadores monitoreados:
-- IPC (Índice de Precios al Consumidor)
-- EMAE (Estimador Mensual de Actividad Económica)
+- IPC, IPIM (precios mayoristas), ICC (costo de la construcción)
+- EMAE, IPI Manufacturero, IPI Minero, ISAC (variación mensual desestacionalizada)
+- UCII (capacidad instalada)
+- Exportaciones, Importaciones, Saldo comercial (USD millones)
 - Desocupación (EPH)
-- IPI Manufacturero (Producción Industrial)
-- IPI Minero (Producción Industrial Minera)
-- ISAC (Actividad de la Construcción)
-- Balanza Comercial (Intercambio Comercial)
-- UCII (Capacidad Instalada en la Industria)
-- Pobreza e Indigencia (EPH)
-- ICC (Índice del Costo de la Construcción)
-- Índice de Salarios
-- Dotación de Personal APN (Administración Pública)
+- Pobreza (hogares y personas) e Indigencia (personas)
+- Índice de Salarios (mensual, interanual, acumulado)
+- Dotación de Personal APN (variación interanual)
 """
+import asyncio
 import httpx
 import re
 from bs4 import BeautifulSoup
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
-from utils import clean_numeric_value, safe_text
+from typing import List, Dict, Any, Optional
+from utils import parse_ar_number, normalize_period, safe_text
 
 INDEC_BASE_URL = "https://www.indec.gob.ar"
-INDEC_HOME_URL = f"{INDEC_BASE_URL}/"
 
-# URLs específicas para indicadores que no aparecen en el homepage
-INDEC_URLS = {
-    "balanza_comercial": f"{INDEC_BASE_URL}/indec/web/Nivel4-Tema-3-2-40",
-    "ucii": f"{INDEC_BASE_URL}/indec/web/Nivel3-Tema-3-7",
-    "pobreza": f"{INDEC_BASE_URL}/indec/web/Nivel3-Tema-4-46",
-    "icc": f"{INDEC_BASE_URL}/indec/web/Nivel4-Tema-3-5-33",
-    "salarios": f"{INDEC_BASE_URL}/indec/web/Nivel4-Tema-4-31-61",
-    "personal_apn": f"{INDEC_BASE_URL}/indec/web/Nivel4-Tema-3-10-102",
+# Fragmentos HTML (se cargan por AJAX en el sitio). Clave → ruta del fragmento.
+INDEC_PAGES = {
+    # Nivel 3: tarjetas destacadas + último informe del tema
+    "precios": "Nivel3/Tema/3/5",
+    "cuentas_nacionales": "Nivel3/Tema/3/9",
+    "industria": "Nivel3/Tema/3/6",
+    "construccion": "Nivel3/Tema/3/3",
+    "comercio_exterior": "Nivel3/Tema/3/2",
+    "trabajo": "Nivel3/Tema/4/31",
+    "pobreza": "Nivel3/Tema/4/46",
+    "mineria": "Nivel3/Tema/3/7",
+    # Nivel 4: informe técnico específico de cada indicador
+    "ipc": "Nivel4/Tema/3/5/31",
+    "ipim": "Nivel4/Tema/3/5/32",
+    "icc": "Nivel4/Tema/3/5/33",
+    "emae": "Nivel4/Tema/3/9/48",
+    "ipi_manufacturero": "Nivel4/Tema/3/6/14",
+    "ucii": "Nivel4/Tema/3/6/15",
+    "balanza": "Nivel4/Tema/3/2/40",
+    "mercado_trabajo": "Nivel4/Tema/4/31/58",
+    "salarios": "Nivel4/Tema/4/31/61",
+    "personal_apn": "Nivel4/Tema/3/10/102",
 }
+
+# Indicadores que se leen de las tarjetas destacadas.
+# card/measure: regex sobre el nombre y la medida de la tarjeta.
+# report: página cuyo PDF se usa como source_url.
+CARD_SPECS = [
+    {"page": "precios", "card": r"precios al consumidor", "measure": r"mensual",
+     "key": "ipc_mensual", "name": "IPC Mensual (Nacional)", "category": "inflacion", "report": "ipc"},
+    {"page": "precios", "card": r"precios mayoristas", "measure": r"mensual",
+     "key": "ipim_mensual", "name": "IPIM (Precios Mayoristas)", "category": "inflacion", "report": "ipim"},
+    {"page": "precios", "card": r"costo de la construcci", "measure": r"mensual",
+     "key": "icc_construccion", "name": "ICC (Costo de la Construcción)", "category": "inflacion", "report": "icc"},
+    {"page": "cuentas_nacionales", "card": r"actividad econ", "measure": r"mensual",
+     "key": "emae_mom_sa", "name": "EMAE (MoM Desestacionalizada)", "category": "actividad", "report": "emae"},
+    {"page": "industria", "card": r"IPI manufacturero", "measure": r"mensual",
+     "key": "ipi_manufacturero_mom_sa", "name": "IPI Manufacturero (MoM Desestacionalizada)", "category": "actividad", "report": "ipi_manufacturero"},
+    {"page": "industria", "card": r"capacidad instalada", "measure": None,
+     "key": "ucii", "name": "UCII (Capacidad Instalada Industria)", "category": "actividad", "report": "ucii"},
+    {"page": "construccion", "card": r"actividad de la construcci", "measure": r"mensual",
+     "key": "isac_mom_sa", "name": "ISAC Construcción (MoM Desestacionalizada)", "category": "actividad", "report": "construccion"},
+    {"page": "comercio_exterior", "card": r"^exportaci", "measure": None,
+     "key": "balanza_exportaciones", "name": "Exportaciones de Bienes", "category": "comercio_exterior", "report": "balanza"},
+    {"page": "comercio_exterior", "card": r"^importaci", "measure": None,
+     "key": "balanza_importaciones", "name": "Importaciones de Bienes", "category": "comercio_exterior", "report": "balanza"},
+    {"page": "comercio_exterior", "card": r"^saldo", "measure": None,
+     "key": "balanza_saldo", "name": "Saldo Comercial", "category": "comercio_exterior", "report": "balanza"},
+    {"page": "trabajo", "card": r"desocupaci", "measure": None,
+     "key": "desocupacion", "name": "Tasa de Desocupación", "category": "laboral", "report": "mercado_trabajo"},
+    {"page": "pobreza", "card": r"poblaci.n bajo la l.nea de pobreza", "measure": None,
+     "key": "pobreza_personas", "name": "Pobreza (% Personas)", "category": "social", "report": "pobreza"},
+    {"page": "pobreza", "card": r"hogares bajo la l.nea de pobreza", "measure": None,
+     "key": "pobreza_hogares", "name": "Pobreza (% Hogares)", "category": "social", "report": "pobreza"},
+]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -45,634 +96,259 @@ HEADERS = {
     "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
 }
 
+# Palabras que indican una variación negativa en los textos del INDEC
+NEGATIVE_WORDS = r'(?:ca[íi]da|baja|reducci[óo]n|disminuci[óo]n|cay[óo]|baj[óo]|disminuy[óo]|redujo|retroceso|variaci[óo]n negativa)'
+CHANGE_WORDS = rf'(?:suba|aumento|incremento|crecimiento|subi[óo]|creci[óo]|aument[óo]|variaci[óo]n positiva|{NEGATIVE_WORDS})'
 
-async def fetch_page(url: str) -> Optional[str]:
+
+def public_url(page_key: str) -> str:
+    """URL pública (navegable) de un fragmento: Nivel3/Tema/3/5 → /indec/web/Nivel3-Tema-3-5."""
+    return f"{INDEC_BASE_URL}/indec/web/{INDEC_PAGES[page_key].replace('/', '-')}"
+
+
+async def fetch_page(client: httpx.AsyncClient, url: str) -> Optional[str]:
     """Descarga una página HTML de forma asíncrona."""
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            response = await client.get(url, headers=HEADERS)
-            response.raise_for_status()
-            return response.text
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.text
     except Exception as e:
         print(f"⚠️ Error fetching {url}: {e}")
         return None
 
 
-def extract_period_from_text(text: str) -> str:
-    """
-    Extrae un período (mes/año) de un texto.
-    Busca patrones como 'Agosto 2026', 'julio de 2026', 'Q2 2026', etc.
-    """
-    months = r'(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)'
-    
-    # Patrón: "Mes de Año" o "Mes Año"
-    match = re.search(rf'({months})\s+(?:de\s+)?(\d{{4}})', text, re.IGNORECASE)
-    if match:
-        return f"{match.group(1).capitalize()} {match.group(2)}"
-    
-    # Patrón: "X trimestre de YYYY" o "QX YYYY"
-    match = re.search(r'(\d)(?:er|do|ro|to)?\s*trimestre\s+(?:de\s+)?(\d{4})', text, re.IGNORECASE)
-    if match:
-        return f"Q{match.group(1)} {match.group(2)}"
-    
-    match = re.search(r'[Qq](\d)\s*(\d{4})', text)
-    if match:
-        return f"Q{match.group(1)} {match.group(2)}"
-    
-    # Patrón: "semestre de YYYY"
-    match = re.search(r'(\d)(?:er|do)?\s*semestre\s+(?:de\s+)?(\d{4})', text, re.IGNORECASE)
-    if match:
-        return f"S{match.group(1)} {match.group(2)}"
-    
-    # Solo año
-    match = re.search(r'(\d{4})', text)
-    if match:
-        return match.group(1)
-    
-    return ""
-
-
-def clean_usd_value(text: str) -> Optional[float]:
-    """
-    Limpia valores en USD con formatos como:
-    - "USD 8.883 millones"
-    - "USD 6.696 millones"
-    - "8.883 millones"
-    Retorna el valor en millones.
-    """
-    if not text:
-        return None
-    
-    cleaned = text.strip()
-    
-    # Remover prefijos de moneda
-    cleaned = re.sub(r'USD\s*', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'US\$\s*', '', cleaned)
-    cleaned = re.sub(r'ARS\s*', '', cleaned)
-    cleaned = re.sub(r'\$\s*', '', cleaned)
-    
-    # Remover sufijos
-    cleaned = re.sub(r'\s*millones?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s*mil\s*millones?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = cleaned.strip()
-    
-    value = clean_numeric_value(cleaned)
+def signed_value(verb: str, number: str) -> Optional[float]:
+    """Aplica el signo según el verbo ('caída de 5,8%' → -5.8)."""
+    value = parse_ar_number(number)
+    if value is not None and re.fullmatch(NEGATIVE_WORDS, verb.strip(), re.IGNORECASE):
+        value = -abs(value)
     return value
 
 
-def parse_home_indicators(html: str) -> List[Dict[str, Any]]:
+def parse_cards(html: str) -> List[Dict[str, str]]:
     """
-    Extrae los indicadores principales del homepage del INDEC.
-    La homepage muestra bloques con: valor, nombre del indicador, período, y link al PDF.
+    Extrae las tarjetas destacadas de un fragmento.
+    Estructura: .indicadores-inicio > .col-md-3 con
+      .font-2 (nombre), .font-1 (valor), .font-11 (medida), .font-33 (período), .font-111 (serie)
     """
-    indicators = []
     soup = BeautifulSoup(html, 'lxml')
-    all_links = soup.find_all('a', href=True)
-    
-    for link in all_links:
-        href = link.get('href', '')
-        text = safe_text(link)
-        
-        if not text or len(text) < 5:
-            continue
-        
-        # Solo procesar links a informes de prensa (PDFs)
-        if '/uploads/informesdeprensa/' not in href or not href.endswith('.pdf'):
-            continue
-        
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        if len(lines) < 2:
-            continue
-        
-        # Buscar valor numérico y período en las líneas
-        value_text = ''
-        period = ''
-        name = ''
-        
-        for line in lines:
-            # Buscar línea con valor numérico (contiene % o es un número con coma/punto)
-            if re.search(r'-?\d+[.,]\d+\s*%?', line):
-                value_text = line
-            # Buscar período (mes + año)
-            elif re.search(r'(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|trimestre|semestre)\s+\d{4}', line, re.IGNORECASE):
-                period = extract_period_from_text(line)
-            # El resto es el nombre
-            elif len(line) > 3 and not line.startswith('http') and not line.startswith('!'):
-                name = line
-        
-        if not value_text:
-            continue
-        
-        value = clean_numeric_value(value_text)
+    cards = []
+    for card in soup.select('.indicadores-inicio [class*="col-"]'):
+        value = card.select_one('.font-1')
         if value is None:
             continue
-        
-        # Determinar el indicador por el nombre o URL
-        href_lower = href.lower()
-        name_lower = name.lower()
-        
-        indicator_key = None
-        indicator_name = name
-        category = 'actividad'
-        unit = '%'
-        
-        if 'ipc' in href_lower or ('precios' in name_lower and 'consumidor' in name_lower):
-            indicator_key = 'ipc_mensual'
-            indicator_name = 'IPC Mensual (Nacional)'
-            category = 'inflacion'
-        elif 'emae' in href_lower or 'actividad económica' in name_lower:
-            indicator_key = 'emae_mom_sa'
-            indicator_name = 'EMAE (MoM Desestacionalizada)'
-            category = 'actividad'
-        elif 'trabajo' in href_lower or 'desocupacion' in href_lower or 'desocupación' in name_lower:
-            indicator_key = 'desocupacion'
-            indicator_name = 'Tasa de Desocupación'
-            category = 'laboral'
-        elif 'ipi' in href_lower and 'manufacturero' in href_lower:
-            indicator_key = 'ipi_manufacturero_mom_sa'
-            indicator_name = 'IPI Manufacturero (MoM Desestacionalizada)'
-            category = 'actividad'
-        elif 'ipi' in href_lower and 'minero' in href_lower:
-            indicator_key = 'ipi_minero_mom_sa'
-            indicator_name = 'IPI Minero (MoM Desestacionalizada)'
-            category = 'actividad'
-        elif 'isac' in href_lower or ('construcci' in name_lower and 'actividad' in name_lower):
-            indicator_key = 'isac_mom_sa'
-            indicator_name = 'ISAC Construcción (MoM Desestacionalizada)'
-            category = 'actividad'
-        
-        if indicator_key:
-            full_url = href if href.startswith('http') else f"{INDEC_BASE_URL}{href}"
-            indicators.append({
-                "indicator_key": indicator_key,
-                "name": indicator_name,
-                "value": value,
-                "value_raw": value_text,
-                "unit": unit,
-                "period": period,
-                "source": "INDEC",
-                "source_url": full_url,
-                "category": category
-            })
-    
-    return indicators
+        cards.append({
+            "name": safe_text(card.select_one('.font-2')),
+            "value": safe_text(value),
+            "measure": safe_text(card.select_one('.font-11')),
+            "period": safe_text(card.select_one('.font-33')),
+            "series": safe_text(card.select_one('.font-111')),
+        })
+    return cards
 
 
-async def scrape_balanza_comercial(html: str) -> List[Dict[str, Any]]:
+def parse_reports(html: str) -> List[Dict[str, Any]]:
     """
-    Extrae la variación interanual (YoY) del saldo de la balanza comercial.
-    
-    Formato esperado:
-    "El superávit comercial alcanzó USD 2.187 millones en agosto de 2026,
-     lo que representa una variación de X% respecto a igual mes del año anterior."
+    Extrae los bloques de informes técnicos (.item-n3) de un fragmento.
+    El título puede venir como "10/09/26. Índice de precios..." (Nivel 4) o con la
+    fecha en un .card-text separado (Nivel 3).
     """
+    soup = BeautifulSoup(html, 'lxml')
+    reports = []
+    for item in soup.select('.item-n3'):
+        title = safe_text(item.select_one('.card-titulo3'))
+        date_text = safe_text(item.select_one('.card-text'))
+
+        match = re.match(r'(\d{1,2}/\d{1,2}/\d{2,4})\.?\s*(.*)', title)
+        if match:
+            date_text, title = match.group(1), match.group(2)
+
+        pdf = item.find('a', href=re.compile(r'/?uploads/informesdeprensa/.*\.pdf$', re.I))
+        pdf_url = None
+        if pdf:
+            href = pdf['href']
+            pdf_url = href if href.startswith('http') else f"{INDEC_BASE_URL}/{href.lstrip('/')}"
+
+        reports.append({
+            "title": title,
+            "date": parse_report_date(date_text),
+            "text": safe_text(item.select_one('.card-texto3')),
+            "pdf_url": pdf_url,
+        })
+    return reports
+
+
+def parse_report_date(text: str) -> Optional[datetime]:
+    """'10/09/26' o '07/10/2026' → datetime."""
+    match = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', text or '')
+    if not match:
+        return None
+    day, month, year = (int(g) for g in match.groups())
+    if year < 100:
+        year += 2000
+    try:
+        return datetime(year, month, day)
+    except ValueError:
+        return None
+
+
+def first_report(reports: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Primer informe de la página que tenga PDF."""
+    return next((r for r in reports if r["pdf_url"]), None)
+
+
+def make_indicator(key, name, value, value_raw, unit, period, source_url, category) -> Dict[str, Any]:
+    return {
+        "indicator_key": key,
+        "name": name,
+        "value": value,
+        "value_raw": value_raw,
+        "unit": unit,
+        "period": period,
+        "source": "INDEC",
+        "source_url": source_url,
+        "category": category,
+    }
+
+
+def indicators_from_cards(cards_by_page, report_urls) -> List[Dict[str, Any]]:
+    """Mapea las tarjetas destacadas a indicadores según CARD_SPECS."""
     indicators = []
-    soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar variación interanual del saldo/superávit/déficit
-    variacion_saldo_patterns = [
-        r'saldo\s*(?:comercial)?.*?variación.*?(\d+[.,]\d+)\s*%',
-        r'superávit.*?variación.*?(\d+[.,]\d+)\s*%',
-        r'balanza.*?variación.*?(\d+[.,]\d+)\s*%',
-        r'superávit\s*(?:comercial)?.*?(\d+[.,]\d+)\s*%.*?(?:interanual|anual|respecto)',
-        r'(\d+[.,]\d+)\s*%.*?(?:interanual|anual).*?(?:superávit|saldo|balanza)',
-    ]
-    
-    for pattern in variacion_saldo_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and abs(value) < 200:  # Variación razonable
-                # Determinar signo basado en contexto
-                context = all_text[max(0, match.start()-100):match.end()]
-                is_negative = any(word in context.lower() for word in ['caída', 'baja', 'reducción', 'disminución', 'retroceso'])
-                if is_negative:
-                    value = -value
-                
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "balanza_saldo_yoy",
-                    "name": "Saldo Comercial (YoY)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["balanza_comercial"],
-                    "category": "comercio_exterior"
-                })
-                break
-    
+    for spec in CARD_SPECS:
+        for card in cards_by_page.get(spec["page"], []):
+            if not re.search(spec["card"], card["name"], re.IGNORECASE):
+                continue
+            if spec["measure"] and not re.search(spec["measure"], card["measure"], re.IGNORECASE):
+                continue
+            value = parse_ar_number(card["value"])
+            if value is None:
+                continue
+            unit = '%' if '%' in card["value"] else (
+                'USD millones' if 'millones de d' in card["measure"].lower() else card["measure"]
+            )
+            indicators.append(make_indicator(
+                spec["key"], spec["name"], value, card["value"], unit,
+                normalize_period(card["period"]),
+                report_urls.get(spec["report"]) or public_url(spec["report"]),
+                spec["category"],
+            ))
+            break
+        else:
+            print(f"⚠️ INDEC: no se encontró la tarjeta para {spec['key']}")
     return indicators
 
 
-async def scrape_ucii(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae la Utilización de la Capacidad Instalada en la Industria (UCII).
-    Es un porcentaje que mide la proporción utilizada de la capacidad productiva.
-    
-    Formato esperado: "La UCII se ubicó en X,X% en [período]"
-    """
+def indicators_from_reports(reports_by_page, report_urls) -> List[Dict[str, Any]]:
+    """Indicadores que solo aparecen en el texto de los informes técnicos."""
     indicators = []
-    soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar el valor de UCII
-    ucii_patterns = [
-        r'(?:UCII|capacidad\s*instalada).*?(\d+[.,]\d+)\s*%',
-        r'utilizaci[oó]n.*?capacidad.*?(\d+[.,]\d+)\s*%',
-        r'capacidad\s*instalada.*?(\d+[.,]\d+)\s*%',
-        r'(\d+[.,]\d+)\s*%.*?(?:UCII|capacidad\s*instalada)',
-    ]
-    
-    for pattern in ucii_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
+
+    def report_text(page):
+        report = first_report(reports_by_page.get(page, []))
+        return report["text"] if report else ''
+
+    def url(page):
+        return report_urls.get(page) or public_url(page)
+
+    # IPI Minero: "el índice de la serie desestacionalizada muestra una suba de 1,9% respecto al mes anterior"
+    text = report_text("mineria")
+    match = re.search(
+        rf'serie desestacionalizada\s+(?:muestra|registra|presenta)?\s*(?:una\s+)?({CHANGE_WORDS})\s+(?:de\s+)?(-?\d+(?:,\d+)?)\s*%',
+        text, re.IGNORECASE)
+    if match:
+        indicators.append(make_indicator(
+            "ipi_minero_mom_sa", "IPI Minero (MoM Desestacionalizada)",
+            signed_value(match.group(1), match.group(2)), match.group(2), "%",
+            normalize_period(text), url("mineria"), "actividad"))
+
+    # Indigencia: "hay 5,6% de hogares por debajo de la línea de indigencia (LI), que incluyen al 7,5% de las personas"
+    text = report_text("pobreza")
+    match = re.search(r'indigencia.{0,80}?(\d+,\d+)\s*%\s+de\s+las\s+personas', text, re.IGNORECASE | re.DOTALL)
+    if match:
+        indicators.append(make_indicator(
+            "indigencia", "Indigencia (% Personas)", parse_ar_number(match.group(1)), match.group(1), "%",
+            normalize_period(text), url("pobreza"), "social"))
+
+    # Salarios: "En julio de 2026, el índice de salarios se incrementó 2,8% mensual y 36,2% interanual.
+    #            El indicador acumula una suba de 21,8% con respecto a diciembre de 2025."
+    text = report_text("salarios")
+    period = normalize_period(text)
+    negative = re.search(rf'salarios\s+(?:se\s+)?{NEGATIVE_WORDS}', text, re.IGNORECASE) is not None
+    for key, name, pattern in (
+        ("salarios_mensual", "Índice de Salarios (Mensual)", r'(-?\d+,\d+)\s*%\s*mensual'),
+        ("salarios_interanual", "Índice de Salarios (Interanual)", r'(-?\d+,\d+)\s*%\s*interanual'),
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            value = clean_numeric_value(match.group(1))
-            # UCII típicamente está entre 40% y 80%
-            if value is not None and 30 < value < 90:
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "ucii",
-                    "name": "UCII (Capacidad Instalada Industria)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["ucii"],
-                    "category": "actividad"
-                })
-                break
-    
+            value = parse_ar_number(match.group(1))
+            indicators.append(make_indicator(
+                key, name, -abs(value) if negative else value, match.group(1), "%",
+                period, url("salarios"), "laboral"))
+    match = re.search(rf'acumula\s+(?:una\s+)?({CHANGE_WORDS})\s+(?:de\s+)?(\d+,\d+)\s*%', text, re.IGNORECASE)
+    if match:
+        indicators.append(make_indicator(
+            "salarios_acumulado", "Índice de Salarios (Acumulado Año)",
+            signed_value(match.group(1), match.group(2)), match.group(2), "%",
+            period, url("salarios"), "laboral"))
+
+    # Personal APN: "Al 31 de agosto de 2026, la dotación ... fue de 269.025 personas; esto representa
+    #               una caída de 5,8% respecto a igual mes del año anterior"
+    text = report_text("personal_apn")
+    match = re.search(rf'({CHANGE_WORDS})\s+de\s+(\d+,\d+)\s*%\s+respecto\s+(?:a|al|de)\s+igual\s+mes', text, re.IGNORECASE)
+    if match:
+        indicators.append(make_indicator(
+            "personal_apn_yoy", "Dotación Personal APN (YoY)",
+            signed_value(match.group(1), match.group(2)), match.group(2), "%",
+            normalize_period(text), url("personal_apn"), "sector_publico"))
+
     return indicators
 
 
-async def scrape_pobreza(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae datos de Pobreza e Indigencia de la EPH.
-    
-    Formato esperado:
-    "El porcentaje de hogares por debajo de la línea de pobreza (LP) 
-     alcanzó el 24,4%. Dentro de estos hogares reside el 32,3% de las personas."
-    """
-    indicators = []
-    soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar pobreza de personas
-    pobreza_persona_patterns = [
-        r'pobreza\s+(?:alcanz[oó]|lleg[oó]|fue)\s+(?:al\s+)?(\d+[.,]\d+)\s*%\s*(?:de\s+las?\s+)?personas',
-        r'(?:del\s+)?(\d+[.,]\d+)\s*%\s*de\s+las?\s+personas.*?pobreza',
-        r'personas\s+(?:bajo|por debajo).*?l[ií]nea.*?pobreza.*?(\d+[.,]\d+)\s*%',
-        r'pobreza.*?(\d+[.,]\d+)\s*%\s*de\s+(?:la\s+)?poblaci',
-    ]
-    
-    for pattern in pobreza_persona_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 10 < value < 60:  # Rango razonable para pobreza
-                period = extract_period_from_text(all_text[:1000])
-                indicators.append({
-                    "indicator_key": "pobreza_personas",
-                    "name": "Pobreza (% Personas)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["pobreza"],
-                    "category": "social"
-                })
-                break
-    
-    # Buscar pobreza de hogares
-    pobreza_hogar_patterns = [
-        r'(?:hogares|porcentaje de hogares).*?(?:l[ií]nea\s+de\s+)?pobreza.*?(\d+[.,]\d+)\s*%',
-        r'pobreza.*?(\d+[.,]\d+)\s*%\s*(?:de\s+)?(?:los\s+)?hogares',
-        r'(\d+[.,]\d+)\s*%.*?hogares.*?pobreza',
-    ]
-    
-    for pattern in pobreza_hogar_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 5 < value < 50:
-                period = extract_period_from_text(all_text[:1000])
-                indicators.append({
-                    "indicator_key": "pobreza_hogares",
-                    "name": "Pobreza (% Hogares)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["pobreza"],
-                    "category": "social"
-                })
-                break
-    
-    # Buscar indigencia
-    indigencia_patterns = [
-        r'indigencia\s+(?:alcanz[oó]|lleg[oó]|fue)\s+(?:al\s+)?(\d+[.,]\d+)\s*%',
-        r'indigencia.*?(\d+[.,]\d+)\s*%\s*(?:de\s+)?(?:la\s+)?poblaci',
-        r'(\d+[.,]\d+)\s*%.*?indigencia',
-    ]
-    
-    for pattern in indigencia_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 1 < value < 30:
-                period = extract_period_from_text(all_text[:1000])
-                indicators.append({
-                    "indicator_key": "indigencia",
-                    "name": "Indigencia (% Personas)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["pobreza"],
-                    "category": "social"
-                })
-                break
-    
-    return indicators
-
-
-async def scrape_icc(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae el Índice del Costo de la Construcción (ICC).
-    
-    Formato esperado:
-    "El nivel general del índice del costo de la construcción (ICC) 
-     en el Gran Buenos Aires correspondiente a agosto de 2026 
-     registra una suba de 2,X%."
-    """
-    indicators = []
-    soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar variación del ICC
-    icc_patterns = [
-        r'(?:ICC|costo\s+(?:de\s+la\s+)?construcci[oó]n).*?(?:suba|baja|variación|aumento|incremento|descenso)\s+(?:de\s+)?(\d+[.,]\d+)\s*%',
-        r'(?:suba|baja|variación|aumento|incremento)\s+(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:ICC|costo.*?construcci)',
-        r'costo.*?construcci.*?(\d+[.,]\d+)\s*%',
-    ]
-    
-    for pattern in icc_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 0 < value < 50:  # Variación mensual razonable
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "icc",
-                    "name": "ICC (Costo de la Construcción)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["icc"],
-                    "category": "construccion"
-                })
-                break
-    
-    return indicators
-
-
-async def scrape_salarios(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae el Índice de Salarios.
-    
-    Formato esperado:
-    "En julio de 2026, el índice de salarios se incrementó 2,8% mensual 
-     y 36,2% interanual. El indicador acumula una suba de 21,8% con 
-     respecto a diciembre de 2025."
-    """
-    indicators = []
-    soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar variación mensual
-    mensual_patterns = [
-        r'[íi]ndice\s+(?:de\s+)?salarios.*?(\d+[.,]\d+)\s*%\s*mensual',
-        r'salarios.*?(?:increment[oó]|subi[oó]|creci[oó])\s+(\d+[.,]\d+)\s*%\s*mensual',
-        r'(\d+[.,]\d+)\s*%\s*mensual.*?salarios',
-    ]
-    
-    for pattern in mensual_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 0 < value < 30:
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "salarios_mensual",
-                    "name": "Índice de Salarios (Mensual)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["salarios"],
-                    "category": "laboral"
-                })
-                break
-    
-    # Buscar variación interanual
-    interanual_patterns = [
-        r'[íi]ndice\s+(?:de\s+)?salarios.*?(\d+[.,]\d+)\s*%\s*interanual',
-        r'salarios.*?(\d+[.,]\d+)\s*%\s*interanual',
-        r'(\d+[.,]\d+)\s*%\s*interanual.*?salarios',
-    ]
-    
-    for pattern in interanual_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 10 < value < 200:
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "salarios_interanual",
-                    "name": "Índice de Salarios (Interanual)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["salarios"],
-                    "category": "laboral"
-                })
-                break
-    
-    # Buscar acumulado anual
-    acumulado_patterns = [
-        r'acumula\s+(?:una\s+)?suba\s+(?:de\s+)?(\d+[.,]\d+)\s*%',
-        r'acumulado.*?(\d+[.,]\d+)\s*%.*?(?:diciembre|respecto)',
-    ]
-    
-    for pattern in acumulado_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 5 < value < 100:
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "salarios_acumulado",
-                    "name": "Índice de Salarios (Acumulado Año)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["salarios"],
-                    "category": "laboral"
-                })
-                break
-    
-    return indicators
-
-
-async def scrape_personal_apn(html: str) -> List[Dict[str, Any]]:
-    """
-    Extrae la variación interanual (YoY) de la Dotación de Personal APN.
-    
-    Formato esperado:
-    "Al 31 de agosto de 2026, la dotación de personal fue de 269.025 personas;
-     esto representa una caída interanual de X%."
-    """
-    indicators = []
-    soup = BeautifulSoup(html, 'lxml')
-    all_text = soup.get_text()
-    
-    # Buscar variación interanual del personal
-    variacion_patterns = [
-        r'(?:representa|implica)\s+(?:una\s+)?(?:ca[ií]da|baja|reducci[oó]n|disminuci[oó]n)\s+(?:interanual\s+)?(?:de\s+)?(\d+[.,]\d+)\s*%',
-        r'(?:ca[ií]da|baja|reducci[oó]n)\s+(?:interanual\s+)?(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:personal|dotaci)',
-        r'(?:aumento|crecimiento|suba)\s+(?:interanual\s+)?(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:personal|dotaci)',
-        r'(\d+[.,]\d+)\s*%.*?(?:interanual|anual).*?(?:personal|dotaci)',
-    ]
-    
-    for pattern in variacion_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and 0 < value < 30:
-                # Determinar si es positivo o negativo
-                context = all_text[max(0, match.start()-100):match.end()]
-                is_negative = any(word in context.lower() for word in ['caída', 'baja', 'reducción', 'disminución', 'caida'])
-                if is_negative:
-                    value = -value
-                
-                period_match = re.search(r'Al\s+(\d+)\s+de\s+(\w+)\s+de\s+(\d{4})', all_text)
-                if period_match:
-                    period = f"{period_match.group(2).capitalize()} {period_match.group(3)}"
-                else:
-                    period = extract_period_from_text(all_text[:500])
-                
-                indicators.append({
-                    "indicator_key": "personal_apn_yoy",
-                    "name": "Dotación Personal APN (YoY)",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "%",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["personal_apn"],
-                    "category": "sector_publico"
-                })
-                break
-    
-    return indicators
-
-
-def parse_publications(html: str) -> List[Dict[str, Any]]:
-    """Extrae publicaciones/noticias del homepage del INDEC."""
-    publications = []
-    soup = BeautifulSoup(html, 'lxml')
-    
-    all_links = soup.find_all('a', href=True)
-    seen_urls = set()
-    
-    for link in all_links:
-        href = link.get('href', '')
-        text = safe_text(link)
-        
-        if '/uploads/informesdeprensa/' in href and href.endswith('.pdf'):
-            if href not in seen_urls and len(text) > 10:
-                seen_urls.add(href)
-                full_url = href if href.startswith('http') else f"{INDEC_BASE_URL}{href}"
-                
-                lines = [l.strip() for l in text.split('\n') if l.strip()]
-                title = lines[0] if lines else 'Informe INDEC'
-                description = ' '.join(lines[1:]) if len(lines) > 1 else ''
-                
-                publications.append({
-                    "title": title[:500],
-                    "date": datetime.now(),
-                    "source": "INDEC",
-                    "url": full_url,
-                    "type": "informe",
-                    "description": description[:300] if description else "Publicación del INDEC"
-                })
-    
-    return publications[:15]
+def publications_from_reports(reports_by_page) -> List[Dict[str, Any]]:
+    """Feed: último informe técnico (con PDF) de cada página, deduplicado por URL."""
+    publications = {}
+    for reports in reports_by_page.values():
+        report = first_report(reports)
+        if not report or report["pdf_url"] in publications:
+            continue
+        description = report["text"].split('Escuchar Dato INDEC')[0].strip()
+        publications[report["pdf_url"]] = {
+            "title": report["title"][:500] or "Informe técnico INDEC",
+            "date": report["date"],
+            "source": "INDEC",
+            "url": report["pdf_url"],
+            "type": "informe",
+            "description": description[:300] or "Informe técnico del INDEC",
+        }
+    return list(publications.values())
 
 
 async def scrape_indec() -> Dict[str, List[Dict[str, Any]]]:
     """
     Función principal de scraping para INDEC.
-    Scrapea el homepage + páginas específicas para indicadores adicionales.
+    Descarga todos los fragmentos (máx. 4 en paralelo) y extrae tarjetas e informes.
     """
-    result = {"indicators": [], "publications": []}
-    
-    # 1. Scrapear homepage (indicadores principales)
-    html = await fetch_page(INDEC_HOME_URL)
-    if html:
-        result["indicators"].extend(parse_home_indicators(html))
-        result["publications"].extend(parse_publications(html))
-    
-    # 2. Scrapear indicadores adicionales en páginas específicas
-    # Balanza Comercial
-    balanza_html = await fetch_page(INDEC_URLS["balanza_comercial"])
-    if balanza_html:
-        result["indicators"].extend(await scrape_balanza_comercial(balanza_html))
-    
-    # UCII
-    ucii_html = await fetch_page(INDEC_URLS["ucii"])
-    if ucii_html:
-        result["indicators"].extend(await scrape_ucii(ucii_html))
-    
-    # Pobreza
-    pobreza_html = await fetch_page(INDEC_URLS["pobreza"])
-    if pobreza_html:
-        result["indicators"].extend(await scrape_pobreza(pobreza_html))
-    
-    # ICC (Costo Construcción)
-    icc_html = await fetch_page(INDEC_URLS["icc"])
-    if icc_html:
-        result["indicators"].extend(await scrape_icc(icc_html))
-    
-    # Salarios
-    salarios_html = await fetch_page(INDEC_URLS["salarios"])
-    if salarios_html:
-        result["indicators"].extend(await scrape_salarios(salarios_html))
-    
-    # Personal APN
-    apn_html = await fetch_page(INDEC_URLS["personal_apn"])
-    if apn_html:
-        result["indicators"].extend(await scrape_personal_apn(apn_html))
-    
-    # Deduplicar indicadores por key (quedarse con el último)
-    seen_keys = {}
-    for ind in result["indicators"]:
-        seen_keys[ind["indicator_key"]] = ind
-    result["indicators"] = list(seen_keys.values())
-    
+    semaphore = asyncio.Semaphore(4)
+
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=HEADERS) as client:
+        async def load(key):
+            async with semaphore:
+                return key, await fetch_page(client, f"{INDEC_BASE_URL}/{INDEC_PAGES[key]}")
+
+        pages = dict(await asyncio.gather(*(load(key) for key in INDEC_PAGES)))
+
+    cards_by_page = {key: parse_cards(html) for key, html in pages.items() if html}
+    reports_by_page = {key: parse_reports(html) for key, html in pages.items() if html}
+    report_urls = {
+        key: report["pdf_url"]
+        for key, reports in reports_by_page.items()
+        if (report := first_report(reports))
+    }
+
+    result = {
+        "indicators": indicators_from_cards(cards_by_page, report_urls)
+                      + indicators_from_reports(reports_by_page, report_urls),
+        "publications": publications_from_reports(reports_by_page),
+    }
+
     print(f"✅ INDEC: {len(result['indicators'])} indicadores, {len(result['publications'])} publicaciones")
     return result
