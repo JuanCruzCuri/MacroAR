@@ -26,7 +26,7 @@ export default function Header({ status }: { status: ScrapeStatus | null }) {
               </div>
             )}
             <a
-              href="https://github.com"
+              href="https://github.com/JuanCruzCuri/MacroAR"
               target="_blank"
               rel="noopener noreferrer"
               className="text-gray-400 hover:text-white transition-colors"

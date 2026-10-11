@@ -211,7 +211,7 @@ def extract_text_between(html_text: str, start_marker: str, end_marker: str) -> 
 def safe_text(element, separator: str = ' ') -> str:
     """
     Extrae texto de un elemento BeautifulSoup de forma segura.
-    Usar separator='\\n' cuando se necesite separar el texto en líneas
+    Usar separator='\n' cuando se necesite separar el texto en líneas
     (get_text(strip=True) sin separador pega los bloques entre sí).
     """
     if element is None:
