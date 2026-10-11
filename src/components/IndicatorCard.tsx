@@ -5,11 +5,15 @@ function getCategoryBadge(category: string): string {
     inflacion: 'badge-red',
     actividad: 'badge-blue',
     laboral: 'badge-green',
+    comercio_exterior: 'badge-amber',
+    social: 'badge-purple',
+    expectativas: 'badge-purple',
+    sector_publico: 'badge-amber',
+    inmobiliario: 'badge-amber',
     cambiario: 'badge-amber',
     financiero: 'badge-purple',
     monetario: 'badge-blue',
     fiscal: 'badge-amber',
-    inmobiliario: 'badge-amber',
   };
   return map[category] || 'badge-blue';
 }
@@ -19,11 +23,15 @@ function getCategoryLabel(category: string): string {
     inflacion: 'Inflación',
     actividad: 'Actividad',
     laboral: 'Laboral',
+    comercio_exterior: 'Comercio Exterior',
+    social: 'Social',
+    expectativas: 'Expectativas',
+    sector_publico: 'Sector Público',
+    inmobiliario: 'Inmobiliario',
     cambiario: 'Cambiario',
-    financiero: 'Expectativas',
+    financiero: 'Financiero',
     monetario: 'Monetario',
     fiscal: 'Fiscal',
-    inmobiliario: 'Inmobiliario',
   };
   return map[category] || category;
 }

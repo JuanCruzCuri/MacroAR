@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Publication } from '../types';
 import { mockPublications } from '../data/mockData';
+
+type SortOption = 'date_desc' | 'date_asc' | 'source';
+type TypeFilter = 'all' | 'informe' | 'reporte' | 'analisis';
 
 function getSourceColor(source: string): string {
   if (source.includes('INDEC')) return 'badge-blue';
@@ -16,6 +19,15 @@ function getTypeIcon(type: string): string {
     case 'reporte': return '📋';
     case 'analisis': return '🔍';
     default: return '📰';
+  }
+}
+
+function getTypeLabel(type: string): string {
+  switch (type) {
+    case 'informe': return 'Informe';
+    case 'reporte': return 'Reporte';
+    case 'analisis': return 'Análisis';
+    default: return type;
   }
 }
 
@@ -43,12 +55,60 @@ function getRelativeTime(dateStr: string): string {
 
 export default function Feed() {
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [sortBy, setSortBy] = useState<SortOption>('date_desc');
+  const [latestOnly, setLatestOnly] = useState(false);
   
   const sources = ['all', 'INDEC', 'CIF-UTDT', 'DGEC - GCBA', 'UCEMA'];
-  
-  const filteredPublications = sourceFilter === 'all'
-    ? mockPublications
-    : mockPublications.filter(p => p.source === sourceFilter);
+  const types: { key: TypeFilter; label: string }[] = [
+    { key: 'all', label: 'Todos los tipos' },
+    { key: 'informe', label: '📄 Informes' },
+    { key: 'reporte', label: '📋 Reportes' },
+    { key: 'analisis', label: '🔍 Análisis' },
+  ];
+
+  // Apply filters and sorting
+  const filteredPublications = useMemo(() => {
+    let result = [...mockPublications];
+    
+    // Filter by source
+    if (sourceFilter !== 'all') {
+      result = result.filter(p => p.source === sourceFilter);
+    }
+    
+    // Filter by type
+    if (typeFilter !== 'all') {
+      result = result.filter(p => p.type === typeFilter);
+    }
+    
+    // Filter latest only (most recent per source)
+    if (latestOnly) {
+      const latestBySource: Record<string, Publication> = {};
+      // Sort by date first to get the latest
+      result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      for (const pub of result) {
+        if (!latestBySource[pub.source]) {
+          latestBySource[pub.source] = pub;
+        }
+      }
+      result = Object.values(latestBySource);
+    }
+    
+    // Sort
+    switch (sortBy) {
+      case 'date_desc':
+        result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        break;
+      case 'date_asc':
+        result.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        break;
+      case 'source':
+        result.sort((a, b) => a.source.localeCompare(b.source));
+        break;
+    }
+    
+    return result;
+  }, [sourceFilter, typeFilter, sortBy, latestOnly]);
 
   return (
     <div>
@@ -61,21 +121,120 @@ export default function Feed() {
         </p>
       </div>
 
-      {/* Source Filters */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {sources.map(source => (
+      {/* Filter Controls */}
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-6">
+        {/* Row 1: Source + Type + Sort */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          {/* Source Filter */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wide">
+              Fuente
+            </label>
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              {sources.map(source => (
+                <option key={source} value={source}>
+                  {source === 'all' ? 'Todas las fuentes' : source}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Type Filter */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wide">
+              Tipo
+            </label>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              {types.map(t => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sort */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wide">
+              Ordenar por
+            </label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="date_desc">Más recientes primero</option>
+              <option value="date_asc">Más antiguos primero</option>
+              <option value="source">Por fuente (A-Z)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Row 2: Toggle + Quick Filters */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Latest Only Toggle */}
           <button
-            key={source}
-            onClick={() => setSourceFilter(source)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              sourceFilter === source
-                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+            onClick={() => setLatestOnly(!latestOnly)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              latestOnly
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                 : 'bg-gray-800/50 text-gray-400 border border-gray-700/50 hover:text-gray-200 hover:border-gray-600'
             }`}
           >
-            {source === 'all' ? 'Todas las fuentes' : source}
+            <svg className={`w-3.5 h-3.5 ${latestOnly ? 'text-emerald-400' : 'text-gray-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Solo última publicación por fuente
           </button>
-        ))}
+
+          {/* Quick source buttons */}
+          <div className="hidden md:flex items-center gap-1.5 ml-auto">
+            <span className="text-xs text-gray-500 mr-1">Filtro rápido:</span>
+            {sources.slice(1).map(source => (
+              <button
+                key={source}
+                onClick={() => setSourceFilter(sourceFilter === source ? 'all' : source)}
+                className={`px-2 py-1 rounded text-xs transition-all ${
+                  sourceFilter === source
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                    : 'bg-gray-800/30 text-gray-500 border border-gray-700/30 hover:text-gray-300'
+                }`}
+              >
+                {source}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Results count */}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-500">
+          {filteredPublications.length} {filteredPublications.length === 1 ? 'publicación' : 'publicaciones'}
+          {latestOnly && ' (última por fuente)'}
+        </p>
+        {(sourceFilter !== 'all' || typeFilter !== 'all' || latestOnly) && (
+          <button
+            onClick={() => {
+              setSourceFilter('all');
+              setTypeFilter('all');
+              setLatestOnly(false);
+              setSortBy('date_desc');
+            }}
+            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {/* Publications List */}
@@ -86,8 +245,21 @@ export default function Feed() {
       </div>
 
       {filteredPublications.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-500">No hay publicaciones para esta fuente.</p>
+        <div className="text-center py-12 bg-gray-900/30 rounded-xl border border-gray-800">
+          <svg className="w-12 h-12 text-gray-700 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-gray-500">No hay publicaciones con los filtros seleccionados.</p>
+          <button
+            onClick={() => {
+              setSourceFilter('all');
+              setTypeFilter('all');
+              setLatestOnly(false);
+            }}
+            className="mt-3 text-sm text-blue-400 hover:text-blue-300"
+          >
+            Limpiar filtros
+          </button>
         </div>
       )}
     </div>
@@ -124,6 +296,9 @@ function PublicationItem({ publication }: { publication: Publication }) {
           <div className="flex items-center gap-3 flex-wrap">
             <span className={`badge ${getSourceColor(publication.source)}`}>
               {publication.source}
+            </span>
+            <span className="badge badge-blue opacity-70">
+              {getTypeLabel(publication.type)}
             </span>
             <span className="text-xs text-gray-500">
               {formatDate(publication.date)}

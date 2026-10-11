@@ -106,12 +106,28 @@ async def health_check():
 
 
 @app.get("/api/indicators", response_model=List[dict])
-async def get_indicators(db: Session = Depends(get_db)):
+async def get_indicators(
+    category: str = None,
+    source: str = None,
+    db: Session = Depends(get_db)
+):
     """
     Obtiene el snapshot actual de todos los indicadores.
     Retorna solo el último valor de cada indicador (sin histórico).
+    
+    Parámetros opcionales:
+    - category: filtrar por categoría (inflacion, actividad, laboral, 
+      comercio_exterior, social, expectativas, sector_publico, inmobiliario)
+    - source: filtrar por fuente (INDEC, CIF-UTDT, IPC CABA - DGEC, UCEMA)
     """
-    indicators = db.query(IndicatorSnapshot).order_by(IndicatorSnapshot.category).all()
+    query = db.query(IndicatorSnapshot)
+    
+    if category:
+        query = query.filter(IndicatorSnapshot.category == category)
+    if source:
+        query = query.filter(IndicatorSnapshot.source == source)
+    
+    indicators = query.order_by(IndicatorSnapshot.category).all()
     return [indicator.to_dict() for indicator in indicators]
 
 
@@ -131,20 +147,59 @@ async def get_indicator(indicator_key: str, db: Session = Depends(get_db)):
 @app.get("/api/publications", response_model=List[dict])
 async def get_publications(
     source: str = None,
+    type: str = None,
+    latest_only: bool = False,
     limit: int = 20,
     db: Session = Depends(get_db)
 ):
     """
     Obtiene el feed de publicaciones ordenadas por fecha (más reciente primero).
-    Opcionalmente filtra por fuente.
+    
+    Parámetros opcionales:
+    - source: filtrar por fuente (INDEC, CIF-UTDT, DGEC - GCBA, UCEMA)
+    - type: filtrar por tipo (informe, reporte, analisis)
+    - latest_only: si es True, retorna solo la última publicación por fuente
+    - limit: máximo de resultados (default 20)
     """
     query = db.query(PublicationFeed)
     
     if source:
         query = query.filter(PublicationFeed.source == source)
+    if type:
+        query = query.filter(PublicationFeed.type == type)
+    
+    if latest_only:
+        # Obtener la última publicación por fuente
+        from sqlalchemy import func
+        subq = db.query(
+            PublicationFeed.source,
+            func.max(PublicationFeed.date).label('max_date')
+        ).group_by(PublicationFeed.source).subquery()
+        
+        query = query.join(
+            subq,
+            (PublicationFeed.source == subq.c.source) &
+            (PublicationFeed.date == subq.c.max_date)
+        )
     
     publications = query.order_by(PublicationFeed.date.desc()).limit(limit).all()
     return [pub.to_dict() for pub in publications]
+
+
+@app.get("/api/meta/categories")
+async def get_categories(db: Session = Depends(get_db)):
+    """Retorna las categorías de indicadores disponibles."""
+    categories = db.query(IndicatorSnapshot.category).distinct().all()
+    return {"categories": [c[0] for c in categories if c[0]]}
+
+
+@app.get("/api/meta/sources")
+async def get_sources(db: Session = Depends(get_db)):
+    """Retorna las fuentes de datos disponibles."""
+    ind_sources = db.query(IndicatorSnapshot.source).distinct().all()
+    pub_sources = db.query(PublicationFeed.source).distinct().all()
+    all_sources = set([s[0] for s in ind_sources if s[0]] + [s[0] for s in pub_sources if s[0]])
+    return {"sources": sorted(list(all_sources))}
 
 
 @app.post("/api/scrape")

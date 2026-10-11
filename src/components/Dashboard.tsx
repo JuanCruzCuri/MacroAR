@@ -8,7 +8,10 @@ const categories = [
   { key: 'inflacion', label: 'Inflación' },
   { key: 'actividad', label: 'Actividad' },
   { key: 'laboral', label: 'Laboral' },
-  { key: 'financiero', label: 'Expectativas' },
+  { key: 'comercio_exterior', label: 'Comercio Exterior' },
+  { key: 'social', label: 'Social' },
+  { key: 'expectativas', label: 'Expectativas' },
+  { key: 'sector_publico', label: 'Sector Público' },
   { key: 'inmobiliario', label: 'Inmobiliario' },
 ];
 
