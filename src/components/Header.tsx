@@ -16,7 +16,7 @@ export default function Header() {
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500">
               <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-              <span>Última actualización: Viernes 18:00 ART</span>
+              <span>Última actualización: 17 de Octubre 2026, 18:00 ART</span>
             </div>
             <a
               href="https://github.com"
