@@ -4,10 +4,11 @@ import Feed from './components/Feed';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import { fetchStatus, useApi } from './api';
+import { FALLBACK_STATUS } from './fallbackData';
 
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'feed'>('dashboard');
-  const { data: status } = useApi(fetchStatus);
+  const { data: status, isOffline } = useApi(fetchStatus, FALLBACK_STATUS);
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
@@ -49,7 +50,7 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        {activeTab === 'dashboard' ? <Dashboard status={status} /> : <Feed />}
+        {activeTab === 'dashboard' ? <Dashboard status={status} isOffline={isOffline} /> : <Feed isOffline={isOffline} />}
       </main>
 
       <Footer status={status} />
