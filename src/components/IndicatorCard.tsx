@@ -9,6 +9,7 @@ function getCategoryBadge(category: string): string {
     financiero: 'badge-purple',
     monetario: 'badge-blue',
     fiscal: 'badge-amber',
+    inmobiliario: 'badge-amber',
   };
   return map[category] || 'badge-blue';
 }
@@ -19,9 +20,10 @@ function getCategoryLabel(category: string): string {
     actividad: 'Actividad',
     laboral: 'Laboral',
     cambiario: 'Cambiario',
-    financiero: 'Financiero',
+    financiero: 'Expectativas',
     monetario: 'Monetario',
     fiscal: 'Fiscal',
+    inmobiliario: 'Inmobiliario',
   };
   return map[category] || category;
 }

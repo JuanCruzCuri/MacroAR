@@ -8,10 +8,8 @@ const categories = [
   { key: 'inflacion', label: 'Inflación' },
   { key: 'actividad', label: 'Actividad' },
   { key: 'laboral', label: 'Laboral' },
-  { key: 'cambiario', label: 'Cambiario' },
-  { key: 'financiero', label: 'Financiero' },
-  { key: 'monetario', label: 'Monetario' },
-  { key: 'fiscal', label: 'Fiscal' },
+  { key: 'financiero', label: 'Expectativas' },
+  { key: 'inmobiliario', label: 'Inmobiliario' },
 ];
 
 export default function Dashboard() {
@@ -59,13 +57,16 @@ export default function Dashboard() {
       {/* Info Banner */}
       <div className="mt-8 p-4 bg-gray-900/50 border border-gray-800 rounded-xl">
         <div className="flex items-start gap-3">
-          <svg className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <div>
             <p className="text-sm text-gray-300">
-              <span className="font-medium text-blue-400">Nota:</span> Los datos se actualizan automáticamente cada viernes a las 18:00 ART.
-              Las fuentes son públicas y oficiales. Los valores mostrados corresponden al último dato disponible al momento de la última ejecución.
+              <span className="font-medium text-emerald-400">Datos verificados:</span> Los valores mostrados fueron obtenidos por scraping directo de las fuentes oficiales (INDEC, CIF-UTDT, DGEC-CABA, UCEMA).
+              Se actualizan automáticamente cada viernes a las 18:00 ART.
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Último scraping: Octubre 2026 · Los enlaces apuntan a los documentos PDF originales de cada fuente.
             </p>
           </div>
         </div>

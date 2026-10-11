@@ -2,7 +2,7 @@
 MacroAR - Scraper IPC CABA (Dirección General de Estadística y Censos)
 =======================================================================
 Scraping del IPC de la Ciudad de Buenos Aires.
-Fuente: https://www.estadisticaciudad.gob.ar/
+Publicaciones disponibles en estadisticaciudad.gob.ar
 """
 import httpx
 import re
@@ -12,8 +12,8 @@ from typing import List, Dict, Any, Optional
 from utils import clean_numeric_value, safe_text
 
 CABA_BASE_URL = "https://www.estadisticaciudad.gob.ar"
-CABA_IPC_URL = f"{CABA_BASE_URL}/eyc/?p=2627"
-CABA_PUBLICACIONES_URL = f"{CABA_BASE_URL}/eyc/?cat=2627"
+CABA_EYC_URL = f"{CABA_BASE_URL}/eyc/"
+CABA_BUSCADOR_URL = f"{CABA_BASE_URL}/eyc/buscador-publicaciones/"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -40,56 +40,55 @@ def parse_ipc_caba(html: str) -> List[Dict[str, Any]]:
     soup = BeautifulSoup(html, 'lxml')
     all_text = soup.get_text()
     
-    # Buscar tablas con datos del IPC CABA
-    tables = soup.find_all('table')
-    for table in tables:
-        rows = table.find_all('tr')
-        for row in rows:
-            cells = [safe_text(td) for td in row.find_all(['td', 'th'])]
-            if len(cells) >= 2:
-                # Buscar celdas con valores de variación
-                for i, cell in enumerate(cells):
-                    value = clean_numeric_value(cell)
-                    if value is not None and 0 < value < 30:  # Rango razonable para IPC mensual
-                        period = cells[0] if i > 0 else ""
-                        indicators.append({
-                            "indicator_key": "ipc_caba",
-                            "name": "IPC CABA Mensual",
-                            "value": value,
-                            "value_raw": cell,
-                            "unit": "%",
-                            "period": period if period else datetime.now().strftime("%B %Y"),
-                            "source": "IPC CABA - DGEC",
-                            "source_url": CABA_BASE_URL,
-                            "category": "inflacion"
-                        })
-                        break
-                if indicators:
-                    break
-        if indicators:
-            break
+    # Buscar links a publicaciones IPCBA
+    links = soup.find_all('a', href=True)
     
-    # Fallback: buscar en texto
-    if not indicators:
-        patterns = [
-            r'IPC.*?CABA.*?(\d+[.,]\d+)\s*%',
-            r'Nivel\s*general.*?(\d+[.,]\d+)',
-            r'Variación.*?(\d+[.,]\d+)\s*%',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-            if match:
-                value = clean_numeric_value(match.group(1))
-                if value is not None and 0 < value < 30:
+    for link in links:
+        href = link.get('href', '')
+        text = safe_text(link)
+        
+        if 'ipcba' in href.lower() or 'ipcba' in text.lower():
+            # Found IPCBA publication link
+            full_url = href if href.startswith('http') else f"{CABA_BASE_URL}{href}"
+            
+            # Try to extract values from the text
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            for line in lines:
+                value = clean_numeric_value(line)
+                if value is not None and 0 < value < 20:
                     indicators.append({
                         "indicator_key": "ipc_caba",
-                        "name": "IPC CABA Mensual",
+                        "name": "IPCBA Mensual",
+                        "value": value,
+                        "value_raw": line,
+                        "unit": "%",
+                        "period": datetime.now().strftime("%B %Y"),
+                        "source": "IPC CABA - DGEC",
+                        "source_url": full_url,
+                        "category": "inflacion"
+                    })
+                    break
+    
+    # Fallback: buscar en texto de la página
+    if not indicators:
+        patterns = [
+            r'[Vv]ariación\s+mensual\s+(\d+[.,]\d+)\s*%?',
+            r'IPCBA.*?(\d+[.,]\d+)\s*%',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, all_text, re.DOTALL)
+            if match:
+                value = clean_numeric_value(match.group(1))
+                if value is not None and 0 < value < 20:
+                    indicators.append({
+                        "indicator_key": "ipc_caba",
+                        "name": "IPCBA Mensual",
                         "value": value,
                         "value_raw": match.group(1),
                         "unit": "%",
                         "period": datetime.now().strftime("%B %Y"),
                         "source": "IPC CABA - DGEC",
-                        "source_url": CABA_BASE_URL,
+                        "source_url": CABA_EYC_URL,
                         "category": "inflacion"
                     })
                     break
@@ -102,7 +101,6 @@ def parse_publications(html: str) -> List[Dict[str, Any]]:
     publications = []
     soup = BeautifulSoup(html, 'lxml')
     
-    # Buscar links a informes de IPC
     links = soup.find_all('a', href=True)
     seen_urls = set()
     
@@ -110,8 +108,9 @@ def parse_publications(html: str) -> List[Dict[str, Any]]:
         href = link.get('href', '')
         title = safe_text(link)
         
-        if any(keyword in title.lower() for keyword in ['ipc', 'índice de precios', 'inflación']):
-            if href not in seen_urls and len(title) > 10:
+        if ('ipcba' in href.lower() or 'ipcba' in title.lower() or 
+            'ipc' in title.lower()) and len(title) > 10:
+            if href not in seen_urls:
                 seen_urls.add(href)
                 full_url = href if href.startswith('http') else f"{CABA_BASE_URL}{href}"
                 
@@ -121,7 +120,7 @@ def parse_publications(html: str) -> List[Dict[str, Any]]:
                     "source": "DGEC - GCBA",
                     "url": full_url,
                     "type": "informe",
-                    "description": f"Informe IPC Ciudad de Buenos Aires: {title[:200]}"
+                    "description": f"Informe IPC Ciudad de Buenos Aires"
                 })
     
     return publications[:5]
@@ -131,10 +130,17 @@ async def scrape_ipc_caba() -> Dict[str, List[Dict[str, Any]]]:
     """Función principal de scraping para IPC CABA."""
     result = {"indicators": [], "publications": []}
     
-    html = await fetch_page(CABA_IPC_URL)
+    # Intentar la página principal del eyC
+    html = await fetch_page(CABA_EYC_URL)
     if html:
         result["indicators"] = parse_ipc_caba(html)
         result["publications"] = parse_publications(html)
+    
+    # También intentar el buscador de publicaciones
+    if not result["publications"]:
+        html2 = await fetch_page(CABA_BUSCADOR_URL)
+        if html2:
+            result["publications"] = parse_publications(html2)
     
     print(f"✅ IPC CABA: {len(result['indicators'])} indicadores, {len(result['publications'])} publicaciones")
     return result
