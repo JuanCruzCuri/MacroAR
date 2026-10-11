@@ -66,10 +66,10 @@ export default function Dashboard() {
           <div>
             <p className="text-sm text-gray-300">
               <span className="font-medium text-emerald-400">Datos verificados:</span> Los valores mostrados fueron obtenidos por scraping directo de las fuentes oficiales (INDEC, CIF-UTDT, DGEC-CABA, UCEMA).
-              Se actualizan automáticamente cada viernes a las 18:00 ART.
+              Se actualizan automáticamente todos los días a las 18:00 ART.
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Último scraping: Octubre 2026 · Los enlaces apuntan a los documentos PDF originales de cada fuente.
+              Último scraping: 18 de Octubre 2026 · Los enlaces apuntan a los documentos PDF originales de cada fuente.
             </p>
           </div>
         </div>

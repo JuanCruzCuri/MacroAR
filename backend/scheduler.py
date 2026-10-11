@@ -151,9 +151,9 @@ def start_scheduler():
     """
     scheduler = BackgroundScheduler(timezone=settings.SCRAPE_TIMEZONE)
     
-    # Configurar trigger: Viernes 18:00 Argentina Time
+    # Configurar trigger: Diario a las 18:00 Argentina Time
     trigger = CronTrigger(
-        day_of_week=settings.SCRAPE_DAY_OF_WEEK,
+        day_of_week=settings.SCRAPE_DAY_OF_WEEK,  # '*' = todos los días
         hour=settings.SCRAPE_HOUR,
         minute=settings.SCRAPE_MINUTE,
         timezone=settings.SCRAPE_TIMEZONE
@@ -163,12 +163,12 @@ def start_scheduler():
         run_scraping_job,
         trigger=trigger,
         id="scraping_job",
-        name="Scraping Macroeconómico Semanal",
+        name="Scraping Macroeconómico Diario",
         replace_existing=True,
         misfire_grace_time=3600  # Tolerancia de 1 hora si el servidor estaba apagado
     )
     
     scheduler.start()
-    print(f"📅 Scheduler iniciado: Viernes {settings.SCRAPE_HOUR:02d}:{settings.SCRAPE_MINUTE:02d} {settings.SCRAPE_TIMEZONE}")
+    print(f"📅 Scheduler iniciado: Diario a las {settings.SCRAPE_HOUR:02d}:{settings.SCRAPE_MINUTE:02d} {settings.SCRAPE_TIMEZONE}")
     
     return scheduler

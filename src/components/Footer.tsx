@@ -7,7 +7,7 @@ export default function Footer() {
             Datos obtenidos de fuentes públicas: INDEC, CIF-UTDT, GCBA, UCEMA
           </p>
           <p className="text-xs text-gray-600">
-            Próxima actualización: 24 de Octubre 2026, 18:00 ART
+            Próxima actualización: 19 de Octubre 2026, 18:00 ART
           </p>
         </div>
       </div>

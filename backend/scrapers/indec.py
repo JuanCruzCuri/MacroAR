@@ -181,24 +181,24 @@ def parse_home_indicators(html: str) -> List[Dict[str, Any]]:
             indicator_name = 'IPC Mensual (Nacional)'
             category = 'inflacion'
         elif 'emae' in href_lower or 'actividad económica' in name_lower:
-            indicator_key = 'emae'
-            indicator_name = 'EMAE (Actividad Económica)'
+            indicator_key = 'emae_mom_sa'
+            indicator_name = 'EMAE (MoM Desestacionalizada)'
             category = 'actividad'
         elif 'trabajo' in href_lower or 'desocupacion' in href_lower or 'desocupación' in name_lower:
             indicator_key = 'desocupacion'
             indicator_name = 'Tasa de Desocupación'
             category = 'laboral'
         elif 'ipi' in href_lower and 'manufacturero' in href_lower:
-            indicator_key = 'ipi_manufacturero'
-            indicator_name = 'IPI Manufacturero'
+            indicator_key = 'ipi_manufacturero_mom_sa'
+            indicator_name = 'IPI Manufacturero (MoM Desestacionalizada)'
             category = 'actividad'
         elif 'ipi' in href_lower and 'minero' in href_lower:
-            indicator_key = 'ipi_minero'
-            indicator_name = 'IPI Minero'
+            indicator_key = 'ipi_minero_mom_sa'
+            indicator_name = 'IPI Minero (MoM Desestacionalizada)'
             category = 'actividad'
         elif 'isac' in href_lower or ('construcci' in name_lower and 'actividad' in name_lower):
-            indicator_key = 'isac'
-            indicator_name = 'ISAC (Actividad Construcción)'
+            indicator_key = 'isac_mom_sa'
+            indicator_name = 'ISAC Construcción (MoM Desestacionalizada)'
             category = 'actividad'
         
         if indicator_key:
@@ -220,88 +220,43 @@ def parse_home_indicators(html: str) -> List[Dict[str, Any]]:
 
 async def scrape_balanza_comercial(html: str) -> List[Dict[str, Any]]:
     """
-    Extrae datos de la Balanza Comercial (Intercambio Comercial).
-    Busca exportaciones e importaciones en millones de USD.
+    Extrae la variación interanual (YoY) del saldo de la balanza comercial.
     
-    Formato esperado en la página:
-    "En agosto de 2026, las exportaciones alcanzaron USD 8.883 millones 
-     y las importaciones fueron de USD 6.696 millones."
+    Formato esperado:
+    "El superávit comercial alcanzó USD 2.187 millones en agosto de 2026,
+     lo que representa una variación de X% respecto a igual mes del año anterior."
     """
     indicators = []
     soup = BeautifulSoup(html, 'lxml')
     all_text = soup.get_text()
     
-    # Buscar exportaciones
-    export_patterns = [
-        r'exportaciones\s+(?:alcanzaron|fueron|llegaron|ascendieron)\s+(?:a\s+)?(?:USD\s*)?(\d+[.,]\d+)\s*millones?',
-        r'exportaciones.*?(\d+[.,]\d+)\s*millones?\s*(?:de\s*)?(?:dólares|USD)',
-        r'(?:USD\s*)?(\d+[.,]\d+)\s*millones?.*?exportacion',
+    # Buscar variación interanual del saldo/superávit/déficit
+    variacion_saldo_patterns = [
+        r'saldo\s*(?:comercial)?.*?variación.*?(\d+[.,]\d+)\s*%',
+        r'superávit.*?variación.*?(\d+[.,]\d+)\s*%',
+        r'balanza.*?variación.*?(\d+[.,]\d+)\s*%',
+        r'superávit\s*(?:comercial)?.*?(\d+[.,]\d+)\s*%.*?(?:interanual|anual|respecto)',
+        r'(\d+[.,]\d+)\s*%.*?(?:interanual|anual).*?(?:superávit|saldo|balanza)',
     ]
     
-    for pattern in export_patterns:
+    for pattern in variacion_saldo_patterns:
         match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
         if match:
             value = clean_numeric_value(match.group(1))
-            if value is not None and value > 100:  # Exportaciones > 100M USD
+            if value is not None and abs(value) < 200:  # Variación razonable
+                # Determinar signo basado en contexto
+                context = all_text[max(0, match.start()-100):match.end()]
+                is_negative = any(word in context.lower() for word in ['caída', 'baja', 'reducción', 'disminución', 'retroceso'])
+                if is_negative:
+                    value = -value
+                
                 period = extract_period_from_text(all_text[:500])
                 indicators.append({
-                    "indicator_key": "balanza_exportaciones",
-                    "name": "Exportaciones de Bienes",
+                    "indicator_key": "balanza_saldo_yoy",
+                    "name": "Saldo Comercial (YoY)",
                     "value": value,
                     "value_raw": match.group(1),
-                    "unit": "USD millones",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["balanza_comercial"],
-                    "category": "comercio_exterior"
-                })
-                break
-    
-    # Buscar importaciones
-    import_patterns = [
-        r'importaciones\s+(?:fueron|alcanzaron|llegaron|ascendieron)\s+(?:de\s+)?(?:USD\s*)?(\d+[.,]\d+)\s*millones?',
-        r'importaciones.*?(\d+[.,]\d+)\s*millones?\s*(?:de\s*)?(?:dólares|USD)',
-        r'(?:USD\s*)?(\d+[.,]\d+)\s*millones?.*?importacion',
-    ]
-    
-    for pattern in import_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and value > 100:  # Importaciones > 100M USD
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "balanza_importaciones",
-                    "name": "Importaciones de Bienes",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "USD millones",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["balanza_comercial"],
-                    "category": "comercio_exterior"
-                })
-                break
-    
-    # Buscar saldo comercial (diferencia)
-    saldo_patterns = [
-        r'saldo\s*(?:comercial)?\s*(?:fue|alcanzó|registró)?\s*(?:de\s+)?(?:USD\s*)?(-?\d+[.,]\d+)\s*millones?',
-        r'superávit\s*(?:comercial)?\s*(?:de\s+)?(?:USD\s*)?(\d+[.,]\d+)\s*millones?',
-        r'd[ée]ficit\s*(?:comercial)?\s*(?:de\s+)?(?:USD\s*)?(\d+[.,]\d+)\s*millones?',
-    ]
-    
-    for pattern in saldo_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None:
-                period = extract_period_from_text(all_text[:500])
-                indicators.append({
-                    "indicator_key": "balanza_saldo",
-                    "name": "Saldo Comercial",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "USD millones",
+                    "unit": "%",
                     "period": period,
                     "source": "INDEC",
                     "source_url": INDEC_URLS["balanza_comercial"],
@@ -585,54 +540,22 @@ async def scrape_salarios(html: str) -> List[Dict[str, Any]]:
 
 async def scrape_personal_apn(html: str) -> List[Dict[str, Any]]:
     """
-    Extrae la Dotación de Personal de la Administración Pública Nacional.
+    Extrae la variación interanual (YoY) de la Dotación de Personal APN.
     
     Formato esperado:
-    "Al 31 de agosto de 2026, la dotación de personal de la administración 
-     pública nacional, empresas y sociedades fue de 269.025 personas; 
-     esto representa una caída..."
+    "Al 31 de agosto de 2026, la dotación de personal fue de 269.025 personas;
+     esto representa una caída interanual de X%."
     """
     indicators = []
     soup = BeautifulSoup(html, 'lxml')
     all_text = soup.get_text()
     
-    # Buscar cantidad de personal
-    personal_patterns = [
-        r'dotaci[oó]n\s+(?:de\s+)?personal.*?(\d+[.,]?\d*)\s*(?:personas|empleados|trabajadores)',
-        r'(\d+[.,]?\d*)\s*(?:personas|empleados|trabajadores).*?(?:administraci[oó]n|APN|p[úu]blica)',
-        r'personal.*?(?:fue|ascendi[oó]|alcanz[oó])\s+(?:de\s+)?(\d+[.,]?\d*)\s*personas',
-    ]
-    
-    for pattern in personal_patterns:
-        match = re.search(pattern, all_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            value = clean_numeric_value(match.group(1))
-            if value is not None and value > 10000:  # APN tiene > 100k personas
-                # Buscar período específico
-                period_match = re.search(r'Al\s+(\d+)\s+de\s+(\w+)\s+de\s+(\d{4})', all_text)
-                if period_match:
-                    period = f"{period_match.group(2).capitalize()} {period_match.group(3)}"
-                else:
-                    period = extract_period_from_text(all_text[:500])
-                
-                indicators.append({
-                    "indicator_key": "personal_apn",
-                    "name": "Dotación Personal APN",
-                    "value": value,
-                    "value_raw": match.group(1),
-                    "unit": "personas",
-                    "period": period,
-                    "source": "INDEC",
-                    "source_url": INDEC_URLS["personal_apn"],
-                    "category": "sector_publico"
-                })
-                break
-    
-    # Buscar variación del personal
+    # Buscar variación interanual del personal
     variacion_patterns = [
-        r'(?:representa|implica)\s+(?:una\s+)?(?:ca[ií]da|baja|reducci[oó]n|disminuci[oó]n)\s+(?:de\s+)?(\d+[.,]\d+)\s*%',
-        r'(?:ca[ií]da|baja|reducci[oó]n)\s+(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:personal|dotaci)',
-        r'(?:aumento|crecimiento|suba)\s+(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:personal|dotaci)',
+        r'(?:representa|implica)\s+(?:una\s+)?(?:ca[ií]da|baja|reducci[oó]n|disminuci[oó]n)\s+(?:interanual\s+)?(?:de\s+)?(\d+[.,]\d+)\s*%',
+        r'(?:ca[ií]da|baja|reducci[oó]n)\s+(?:interanual\s+)?(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:personal|dotaci)',
+        r'(?:aumento|crecimiento|suba)\s+(?:interanual\s+)?(?:de\s+)?(\d+[.,]\d+)\s*%.*?(?:personal|dotaci)',
+        r'(\d+[.,]\d+)\s*%.*?(?:interanual|anual).*?(?:personal|dotaci)',
     ]
     
     for pattern in variacion_patterns:
@@ -641,7 +564,7 @@ async def scrape_personal_apn(html: str) -> List[Dict[str, Any]]:
             value = clean_numeric_value(match.group(1))
             if value is not None and 0 < value < 30:
                 # Determinar si es positivo o negativo
-                context = all_text[max(0, match.start()-50):match.end()]
+                context = all_text[max(0, match.start()-100):match.end()]
                 is_negative = any(word in context.lower() for word in ['caída', 'baja', 'reducción', 'disminución', 'caida'])
                 if is_negative:
                     value = -value
@@ -653,8 +576,8 @@ async def scrape_personal_apn(html: str) -> List[Dict[str, Any]]:
                     period = extract_period_from_text(all_text[:500])
                 
                 indicators.append({
-                    "indicator_key": "personal_apn_variacion",
-                    "name": "Variación Personal APN (Interanual)",
+                    "indicator_key": "personal_apn_yoy",
+                    "name": "Dotación Personal APN (YoY)",
                     "value": value,
                     "value_raw": match.group(1),
                     "unit": "%",

@@ -6,10 +6,10 @@ Aplicación web que centraliza información macroeconómica de Argentina mediant
 
 | Fuente | Indicadores | URL |
 |--------|------------|-----|
-| **INDEC** | IPC, EMAE, Desocupación, Salarios | [indec.gob.ar](https://www.indec.gob.ar) |
-| **CIF-UTDT** | Brecha cambiaria, Riesgo país, Resultado fiscal | [utdt.edu/cif](https://www.utdt.edu/centro-investigacion-finanzas) |
+| **INDEC** | IPC, EMAE (MoM SA), IPI Manufacturero (MoM SA), IPI Minero (MoM SA), ISAC (MoM SA), Desocupación, Salarios, Balanza Comercial (YoY), UCII, Pobreza, ICC, Personal APN (YoY) | [indec.gob.ar](https://www.indec.gob.ar) |
+| **CIF-UTDT** | Expectativas de Inflación, Índice de Confianza del Consumidor, Índice Líder | [utdt.edu/cif](https://www.utdt.edu/cif) |
 | **IPC CABA** | IPC Ciudad de Buenos Aires | [estadisticaciudad.gob.ar](https://www.estadisticaciudad.gob.ar) |
-| **UCEMA** | Real M2 Report | [ucema.edu.ar](https://www.ucema.edu.ar) |
+| **UCEMA** | Real M2 Report (Índice M² CABA) | [ucema.edu.ar](https://ucema.edu.ar/indices-y-bases-de-datos) |
 
 ## 🏗️ Arquitectura
 
@@ -262,7 +262,7 @@ macroar/
 ## 📅 Automatización
 
 El scraping se ejecuta automáticamente:
-- **Frecuencia:** Cada viernes
+- **Frecuencia:** Todos los días
 - **Hora:** 18:00 ART (America/Argentina/Buenos_Aires)
 - **Tolerancia:** 1 hora (misfire_grace_time)
 

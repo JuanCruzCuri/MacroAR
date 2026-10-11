@@ -63,10 +63,10 @@ export const mockIndicators: Indicator[] = [
     updated_at: '2026-09-26T18:00:00-03:00'
   },
 
-  // === ACTIVIDAD ===
+  // === ACTIVIDAD (MoM Desestacionalizada) ===
   {
     id: '6',
-    name: 'EMAE (Actividad Económica)',
+    name: 'EMAE (MoM Desestacionalizada)',
     value: '-2.9',
     unit: '%',
     period: 'Julio 2026',
@@ -77,7 +77,7 @@ export const mockIndicators: Indicator[] = [
   },
   {
     id: '7',
-    name: 'IPI Manufacturero',
+    name: 'IPI Manufacturero (MoM Desestacionalizada)',
     value: '1.9',
     unit: '%',
     period: 'Agosto 2026',
@@ -88,8 +88,8 @@ export const mockIndicators: Indicator[] = [
   },
   {
     id: '8',
-    name: 'IPI Minero',
-    value: '8.4',
+    name: 'IPI Minero (MoM Desestacionalizada)',
+    value: '1.9',
     unit: '%',
     period: 'Agosto 2026',
     source: 'INDEC',
@@ -99,8 +99,8 @@ export const mockIndicators: Indicator[] = [
   },
   {
     id: '9',
-    name: 'ISAC (Actividad Construcción)',
-    value: '-4.4',
+    name: 'ISAC Construcción (MoM Desestacionalizada)',
+    value: '0.4',
     unit: '%',
     period: 'Agosto 2026',
     source: 'INDEC',
@@ -155,24 +155,13 @@ export const mockIndicators: Indicator[] = [
     updated_at: '2026-09-26T18:00:00-03:00'
   },
 
-  // === COMERCIO EXTERIOR ===
+  // === COMERCIO EXTERIOR (Saldo YoY) ===
   {
     id: '14',
-    name: 'Exportaciones de Bienes',
-    value: '8883',
-    unit: 'USD millones',
-    period: 'Agosto 2026',
-    source: 'INDEC',
-    source_url: 'https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-2-40',
-    category: 'comercio_exterior',
-    updated_at: '2026-09-26T18:00:00-03:00'
-  },
-  {
-    id: '15',
-    name: 'Importaciones de Bienes',
-    value: '6696',
-    unit: 'USD millones',
-    period: 'Agosto 2026',
+    name: 'Saldo Comercial (YoY)',
+    value: '5.0',
+    unit: '%',
+    period: 'Q2 2026',
     source: 'INDEC',
     source_url: 'https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-2-40',
     category: 'comercio_exterior',
@@ -214,12 +203,12 @@ export const mockIndicators: Indicator[] = [
     updated_at: '2026-09-24T18:00:00-03:00'
   },
 
-  // === SECTOR PÚBLICO ===
+  // === SECTOR PÚBLICO (YoY) ===
   {
     id: '19',
-    name: 'Dotación Personal APN',
-    value: '269025',
-    unit: 'personas',
+    name: 'Dotación Personal APN (YoY)',
+    value: '-5.8',
+    unit: '%',
     period: 'Agosto 2026',
     source: 'INDEC',
     source_url: 'https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-10-102',
