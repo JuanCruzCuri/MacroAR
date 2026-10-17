@@ -1,3 +1,6 @@
+# Blueprint de Render: crea el backend y su base PostgreSQL.
+# Render → New → Blueprint → elegir este repo. No hace falta cargar secretos a mano:
+# DATABASE_URL se toma de la base creada y SCRAPE_TOKEN se genera automáticamente.
 services:
   - type: web
     name: macroar-backend
@@ -5,10 +8,15 @@ services:
     buildCommand: cd backend && pip install -r requirements.txt
     startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # requirements.txt fija versiones sin wheels para Python 3.13 (psycopg2-binary, asyncpg)
+      - key: PYTHON_VERSION
+        value: 3.11.11
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: macroar-db
+          property: connectionString
       - key: FRONTEND_URL
-        value: https://macroar.vercel.app
+        value: https://juancruzcuri.github.io
       - key: SCRAPE_DAY_OF_WEEK
         value: "*"
       - key: SCRAPE_HOUR
@@ -17,8 +25,14 @@ services:
         value: 0
       - key: SCRAPE_TIMEZONE
         value: America/Argentina/Buenos_Aires
-      # Token para POST /api/scrape (usado por .github/workflows/scrape.yml)
+      # Token para POST /api/scrape (copiarlo al secret SCRAPE_TOKEN de GitHub Actions)
       - key: SCRAPE_TOKEN
-        sync: false
+        generateValue: true
     plan: free
     healthCheckPath: /api/health
+
+databases:
+  - name: macroar-db
+    plan: free
+    databaseName: macroar
+    user: macroar
