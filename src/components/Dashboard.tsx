@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { ScrapeStatus } from '../types';
 import { fetchIndicators, formatDateTimeART, useApi } from '../api';
+import { DEMO_INDICATORS } from '../demoData';
 import IndicatorCard from './IndicatorCard';
 import ApiError from './ApiError';
+import DemoBanner from './DemoBanner';
 
 const categories = [
   { key: 'all', label: 'Todos' },
@@ -18,7 +20,7 @@ const categories = [
 
 export default function Dashboard({ status }: { status: ScrapeStatus | null }) {
   const [filter, setFilter] = useState('all');
-  const { data: indicators, error, loading, reload } = useApi(fetchIndicators);
+  const { data: indicators, error, loading, reload, isDemo } = useApi(fetchIndicators, DEMO_INDICATORS);
   const lastUpdate = formatDateTimeART(status?.last_scrape);
 
   const allIndicators = indicators ?? [];
@@ -28,6 +30,8 @@ export default function Dashboard({ status }: { status: ScrapeStatus | null }) {
 
   return (
     <div>
+      {isDemo && <DemoBanner />}
+      
       {/* Section Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white mb-2">Indicadores Económicos</h2>
