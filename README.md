@@ -6,7 +6,7 @@ Aplicación web que centraliza información macroeconómica de Argentina mediant
 
 | Fuente | Indicadores | URL |
 |--------|------------|-----|
-| **INDEC** | IPC, EMAE (MoM SA), IPI Manufacturero (MoM SA), IPI Minero (MoM SA), ISAC (MoM SA), Desocupación, Salarios, Balanza Comercial (YoY), UCII, Pobreza, ICC, Personal APN (YoY) | [indec.gob.ar](https://www.indec.gob.ar) |
+| **INDEC** | IPC, IPIM, ICC, EMAE (MoM SA), IPI Manufacturero (MoM SA), IPI Minero (MoM SA), ISAC (MoM SA), UCII, Exportaciones / Importaciones / Saldo comercial (USD M), Desocupación, Salarios, Pobreza e Indigencia, Personal APN (YoY) | [indec.gob.ar](https://www.indec.gob.ar) |
 | **CIF-UTDT** | Expectativas de Inflación, Índice de Confianza del Consumidor, Índice Líder | [utdt.edu/cif](https://www.utdt.edu/cif) |
 | **IPC CABA** | IPC Ciudad de Buenos Aires | [estadisticaciudad.gob.ar](https://www.estadisticaciudad.gob.ar) |
 | **UCEMA** | Real M2 Report (Índice M² CABA) | [ucema.edu.ar](https://ucema.edu.ar/indices-y-bases-de-datos) |
@@ -58,7 +58,7 @@ cp backend/.env.example backend/.env
 docker-compose up -d
 
 # Acceder a:
-# Frontend: http://localhost:5173
+# Frontend: http://localhost:3000
 # Backend API: http://localhost:8000
 # API Docs: http://localhost:8000/docs
 ```
@@ -95,12 +95,20 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 # En la raíz del proyecto
 npm install
 npm run dev
-# Acceder a http://localhost:5173
+# Acceder a http://localhost:3000
+# Por defecto usa la API en http://localhost:8000 (configurable con VITE_API_URL)
 ```
 
 ### Trigger Manual de Scraping:
+Requiere `SCRAPE_TOKEN` configurado en el backend (en Docker Compose es `dev-token`):
 ```bash
-curl -X POST http://localhost:8000/api/scrape
+curl -X POST -H "X-Scrape-Token: dev-token" http://localhost:8000/api/scrape
+```
+
+### Probar los scrapers sin la API:
+```bash
+cd backend
+python test_scrapers.py
 ```
 
 ## 🌐 Deploy a Producción
@@ -132,11 +140,21 @@ El archivo `vercel.json` ya está configurado para el routing SPA.
      ```
      DATABASE_URL=postgresql://user:pass@host:5432/dbname
      FRONTEND_URL=https://macroar.vercel.app
-     SCRAPE_DAY_OF_WEEK=fri
+     SCRAPE_DAY_OF_WEEK=*
      SCRAPE_HOUR=18
      SCRAPE_MINUTE=0
      SCRAPE_TIMEZONE=America/Argentina/Buenos_Aires
+     SCRAPE_TOKEN=<token aleatorio>
      ```
+5. **Plan free: configurar el cron externo.** En el plan free, Render duerme el servidor
+   tras 15 min sin tráfico y el scheduler interno no corre mientras duerme. El workflow
+   `.github/workflows/scrape.yml` lo despierta y dispara el scraping todos los días a las
+   18:05 ART. Configurar en GitHub → Settings → Secrets and variables → Actions:
+   - `MACROAR_API_URL` = URL del backend (ej: `https://macroar-backend.onrender.com`)
+   - `SCRAPE_TOKEN` = el mismo token configurado en Render
+
+   Además, al iniciar, el backend ejecuta un scraping de recuperación si el último tiene
+   más de `SCRAPE_STALE_HOURS` (24 por defecto).
 
 ### Backend → Railway (Alternativa)
 
@@ -184,9 +202,9 @@ macroar/
 │   │   ├── Feed.tsx              # Tab 2: Feed de publicaciones
 │   │   ├── Header.tsx            # Header con branding
 │   │   ├── Footer.tsx            # Footer
+│   │   ├── ApiError.tsx          # Mensaje de error + reintentar
 │   │   └── IndicatorCard.tsx     # Card individual de indicador
-│   ├── data/
-│   │   └── mockData.ts           # Datos de ejemplo (demo)
+│   ├── api.ts                    # Cliente de la API (VITE_API_URL) + hook useApi
 │   ├── types.ts                  # TypeScript interfaces
 │   ├── index.css                 # Tailwind + custom styles
 │   └── main.tsx                  # Entry point
@@ -195,7 +213,7 @@ macroar/
 │   ├── models.py                 # SQLAlchemy models (snapshot + feed)
 │   ├── database.py               # DB connection
 │   ├── config.py                 # Settings/env vars
-│   ├── scheduler.py              # APScheduler (Viernes 18:00)
+│   ├── scheduler.py              # APScheduler (diario 18:00 ART)
 │   ├── utils.py                  # Limpieza de datos
 │   ├── scrapers/
 │   │   ├── __init__.py
@@ -206,6 +224,7 @@ macroar/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
+├── .github/workflows/scrape.yml  # Cron externo diario (Render free)
 ├── docker-compose.yml            # Orquestación local
 ├── vercel.json                   # Config Vercel frontend
 ├── package.json
@@ -251,13 +270,14 @@ macroar/
 | GET | `/api/indicators` | Todos los indicadores (snapshot) |
 | GET | `/api/indicators/{key}` | Indicador específico |
 | GET | `/api/publications` | Feed de publicaciones |
-| POST | `/api/scrape` | Trigger manual de scraping |
+| GET | `/api/meta/status` | Último scraping y próxima ejecución |
+| POST | `/api/scrape` | Trigger manual de scraping (header `X-Scrape-Token`) |
 
 ## 🔒 Seguridad y CORS
 
 - CORS configurado para aceptar solo el dominio del frontend
 - Variables sensibles en `.env` (no commitear)
-- En producción, agregar autenticación al endpoint `/api/scrape`
+- `POST /api/scrape` requiere el header `X-Scrape-Token` igual a `SCRAPE_TOKEN`; si `SCRAPE_TOKEN` está vacío, el endpoint queda deshabilitado
 
 ## 📅 Automatización
 
@@ -265,6 +285,8 @@ El scraping se ejecuta automáticamente:
 - **Frecuencia:** Todos los días
 - **Hora:** 18:00 ART (America/Argentina/Buenos_Aires)
 - **Tolerancia:** 1 hora (misfire_grace_time)
+- **Recuperación:** al iniciar, si el último scraping tiene más de 24 h se ejecuta uno inmediatamente
+- **Cron externo:** `.github/workflows/scrape.yml` (necesario en hostings que duermen el servidor)
 
 ## 🧹 Limpieza de Datos
 
