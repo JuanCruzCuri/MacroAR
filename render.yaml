@@ -1,6 +1,8 @@
-# Blueprint de Render: crea el backend y su base PostgreSQL.
-# Render → New → Blueprint → elegir este repo. No hace falta cargar secretos a mano:
-# DATABASE_URL se toma de la base creada y SCRAPE_TOKEN se genera automáticamente.
+# Blueprint de Render: crea el backend.
+# Render → New → Blueprint → elegir este repo.
+# - DATABASE_URL: connection string de Neon (https://neon.tech, plan free sin vencimiento).
+#   Se carga a mano en Render → macroar-backend → Environment.
+# - SCRAPE_TOKEN se genera automáticamente.
 services:
   - type: web
     name: macroar-backend
@@ -11,10 +13,9 @@ services:
       # requirements.txt fija versiones sin wheels para Python 3.13 (psycopg2-binary, asyncpg)
       - key: PYTHON_VERSION
         value: 3.11.11
+      # PostgreSQL en Neon. Las bases free de Render vencen a los 30 días.
       - key: DATABASE_URL
-        fromDatabase:
-          name: macroar-db
-          property: connectionString
+        sync: false
       - key: FRONTEND_URL
         value: https://juancruzcuri.github.io
       - key: SCRAPE_DAY_OF_WEEK
@@ -30,9 +31,3 @@ services:
         generateValue: true
     plan: free
     healthCheckPath: /api/health
-
-databases:
-  - name: macroar-db
-    plan: free
-    databaseName: macroar
-    user: macroar

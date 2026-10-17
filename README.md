@@ -179,17 +179,20 @@ railway variables set DATABASE_URL=$DATABASE_URL
 railway variables set FRONTEND_URL=https://macroar.vercel.app
 ```
 
-### Base de Datos → Supabase (Recomendado)
+### Base de Datos → Neon (Recomendado)
+
+1. Crear cuenta en [Neon](https://neon.tech) (plan free, no vence)
+2. Crear proyecto en la región **AWS US West 2 (Oregon)**, la misma que el backend en Render
+3. Copiar la connection string (Connect → `postgresql://...`)
+4. Pegarla como `DATABASE_URL` en Render → macroar-backend → Environment
+
+> Las bases free de Render vencen a los 30 días, por eso no se usan.
+
+### Base de Datos → Supabase (Alternativa)
 
 1. Crear proyecto en [Supabase](https://supabase.com)
 2. Copiar la Connection String (Settings → Database)
 3. Usar como `DATABASE_URL` en el backend
-
-### Base de Datos → Neon (Alternativa)
-
-1. Crear cuenta en [Neon](https://neon.tech)
-2. Crear proyecto y copiar connection string
-3. Usar como `DATABASE_URL`
 
 ## 📁 Estructura del Proyecto
 
