@@ -1,0 +1,64 @@
+# ============================================
+# MacroAR - Deploy del frontend a GitHub Pages
+# ============================================
+# Compila el frontend con Vite y publica dist/ en GitHub Pages.
+# (Servir el repo tal cual no funciona: index.html carga /src/main.tsx,
+#  que el navegador no puede ejecutar → página en blanco.)
+#
+# Requisitos (una sola vez):
+#   - GitHub → Settings → Pages → Build and deployment → Source: "GitHub Actions"
+#   - Opcional: GitHub → Settings → Secrets and variables → Actions → Variables:
+#       VITE_API_URL → URL del backend (p. ej. https://macroar-backend.onrender.com)
+#     Sin esta variable el frontend muestra el modo demo.
+name: Deploy frontend (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "backend/**"
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # El sitio se sirve en https://<usuario>.github.io/<repo>/, no en la raíz
+      - run: npm run build -- --base=/${{ github.event.repository.name }}/
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

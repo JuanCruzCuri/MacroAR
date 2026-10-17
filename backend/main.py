@@ -66,6 +66,7 @@ origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://macroar.vercel.app",
+    "https://juancruzcuri.github.io",  # GitHub Pages (el origin no incluye la ruta /MacroAR/)
     # Agregar más dominios según sea necesario
 ]
 
