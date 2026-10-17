@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
 import { Publication } from '../types';
 import { fetchPublications, useApi } from '../api';
+import { DEMO_PUBLICATIONS } from '../demoData';
 import ApiError from './ApiError';
+import DemoBanner from './DemoBanner';
 
 type SortOption = 'date_desc' | 'date_asc' | 'source';
 type TypeFilter = 'all' | 'informe' | 'reporte' | 'analisis';
@@ -65,7 +67,7 @@ export default function Feed() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('date_desc');
   const [latestOnly, setLatestOnly] = useState(false);
-  const { data: publications, error, loading, reload } = useApi(fetchPublications);
+  const { data: publications, error, loading, reload, isDemo } = useApi(fetchPublications, DEMO_PUBLICATIONS);
   
   const sources = useMemo(
     () => ['all', ...Array.from(new Set((publications ?? []).map(p => p.source))).sort()],
@@ -123,6 +125,8 @@ export default function Feed() {
 
   return (
     <div>
+      {isDemo && <DemoBanner />}
+      
       {/* Section Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white mb-2">Feed de Publicaciones</h2>
